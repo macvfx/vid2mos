@@ -251,6 +251,35 @@ st=$(VID2MOS_SHARED_DIR="$WORK/no-such-share" "$SCRIPT" --selftest 2>&1); strc=$
 check "--selftest fails on an unwritable shared dir" '[ $strc -eq 1 ] && printf "%s" "$st" | grep -q "^shared_dir_writable=FAIL$"'
 
 echo
+echo "prepare-client.sh"
+PREP="$HERE/prepare-client.sh"
+if [ -x "$PREP" ]; then
+    PD="$WORK/prep"; mkdir -p "$PD"
+    out=$("$PREP" --check --dest "$PD/inst.sh" --bin-dir "$BIN_DIR" 2>&1); prc=$?
+    check "--check changes nothing and reports FIX"       '[ ! -e "$PD/inst.sh" ] && [ $prc -eq 1 ] && printf "%s" "$out" | grep -q "FIX   not installed"'
+    out=$("$PREP" --dest "$PD/inst.sh" --bin-dir "$BIN_DIR" --source "$MEDIA/normal.mp4" 2>&1); prc=$?
+    check "install succeeds and says Ready"               '[ $prc -eq 0 ] && printf "%s" "$out" | grep -q "^Ready\."'
+    check "installed copy is identical and executable"    'cmp -s "$HERE/vid2mos-hardened.sh" "$PD/inst.sh" && [ -x "$PD/inst.sh" ]'
+    check "installed mode is 755"                         '[ "$(stat -f %Lp "$PD/inst.sh")" = "755" ]'
+    check "source path was checked"                       'printf "%s" "$out" | grep -q "source_readable=ok"'
+    out=$("$PREP" --dest "$PD/inst.sh" --bin-dir "$BIN_DIR" 2>&1); prc=$?
+    check "second run is idempotent (already current)"    '[ $prc -eq 0 ] && printf "%s" "$out" | grep -q "is current" && [ ! -e "$PD/inst.sh.previous" ]'
+    echo "# local edit" >> "$PD/inst.sh"
+    out=$("$PREP" --dest "$PD/inst.sh" --bin-dir "$BIN_DIR" 2>&1); prc=$?
+    check "a different installed copy is replaced"        '[ $prc -eq 0 ] && cmp -s "$HERE/vid2mos-hardened.sh" "$PD/inst.sh"'
+    check "the replaced copy is kept as .previous"        'grep -q "local edit" "$PD/inst.sh.previous"'
+    out=$("$PREP" --dest "$PD/inst.sh" --bin-dir "$WORK/no-tools" 2>&1); prc=$?
+    check "missing ffmpeg is reported and fails"          '[ $prc -eq 1 ] && printf "%s" "$out" | grep -q "FIX   .*ffmpeg is missing"'
+    out=$("$PREP" --dest "$PD/inst.sh" --bin-dir "$BIN_DIR" --source "$MEDIA/does-not-exist.mov" 2>&1); prc=$?
+    check "an unreadable source path fails the self-test" '[ $prc -eq 1 ] && printf "%s" "$out" | grep -q "source_readable=FAIL"'
+    mkdir -p "$PD/lonely"; cp "$PREP" "$PD/lonely/"
+    out=$("$PD/lonely/prepare-client.sh" --dest "$PD/x.sh" 2>&1); prc=$?
+    check "no script beside it fails clearly"             '[ $prc -eq 1 ] && printf "%s" "$out" | grep -q "not found beside this file"'
+    out=$("$PREP" --bogus 2>&1); prc=$?
+    check "unknown option exits 2"                        '[ $prc -eq 2 ]'
+fi
+
+echo
 echo "Result: $pass passed, $fail failed"
 
 # ------------------------------------------------------- original, for contrast

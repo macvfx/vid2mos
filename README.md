@@ -52,9 +52,10 @@ JPEG, on success; stderr empty; exit 0 or 1.
 | File | Purpose |
 |---|---|
 | `vid2mos-hardened.sh` | The preview script (drop-in replacement for `vid2mos.sh`) |
-| `test-vid2mos.sh` | 63 checks on synthetic media. `--compare <original>` also shows what the original does on the same inputs |
+| `test-vid2mos.sh` | 75 checks on synthetic media. `--compare <original>` also shows what the original does on the same inputs |
 | `batch-vid2mos.sh` | Runs the script over a folder of real media with a per-file report |
 | `vid2mos-log-summary.sh` | Summarises the daily logs: totals per host, runs per minute, unfinished runs, latest failures |
+| `prepare-client.sh` | One command to get a Mac ready: installs the script to `/Library/Scripts`, checks ffmpeg and Remote Login, runs `--selftest`. `--check` changes nothing |
 | `TESTING.md` | How to test the scripts, what to record, and findings so far |
 
 ## Standalone use
@@ -73,7 +74,20 @@ Optional environment variables: `VID2MOS_BIN_DIR`, `VID2MOS_TMP` (output folder,
 
 ## Use with Archiware P5
 
-Install it under a new name and leave the original in place:
+The quickest way, on each machine that may generate previews:
+
+```bash
+sudo ./prepare-client.sh                       # install, then self-test
+./prepare-client.sh --check                    # report only, change nothing
+sudo ./prepare-client.sh --source /path/to/a/video.mov    # also check a source can be read
+```
+
+It installs the copy beside it to `/Library/Scripts/vid2mos-hardened.sh` (owner root, mode 755, no
+quarantine flags), keeps any different earlier copy as `.previous`, checks ffmpeg and ffprobe, runs the
+script's `--selftest` and, as root, reports whether Remote Login is on. It never changes P5's settings,
+turns on Remote Login or touches SSH keys: it prints those as next steps.
+
+To do it by hand, install it under a new name and leave the original in place:
 
 ```bash
 sudo cp vid2mos-hardened.sh /Library/Scripts/vid2mos-hardened.sh
@@ -104,7 +118,7 @@ sudo ./vid2mos-log-summary.sh --since "2026-11-22 09:00"
 
 ## Tested
 
-- 63 checks on synthetic media with P5's bundled ffmpeg 7.1 and macOS's stock `/bin/bash` 3.2.
+- 75 checks on synthetic media with P5's bundled ffmpeg 7.1 and macOS's stock `/bin/bash` 3.2.
 - A real Archive job on P5 8.0.6 (macOS): previews created, no warnings in the server log.
 - A P5 preview client with a read-only source mounted: all runs logged OK and the previews
   appeared in the P5 web interface.

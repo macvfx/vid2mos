@@ -6,7 +6,7 @@ How to check the script on a machine, and what has been learned so far. Tested w
 ## 1. Quick checks (no P5 needed)
 
 ```bash
-./test-vid2mos.sh                              # 63 checks on synthetic media
+./test-vid2mos.sh                              # 75 checks on synthetic media
 ./test-vid2mos.sh --compare /path/to/original-vid2mos.sh   # also shows what the original does
 sudo ./batch-vid2mos.sh /path/to/copies-of-real-media      # per-file report, optional --original
 ```
