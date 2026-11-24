@@ -1,0 +1,228 @@
+#!/bin/bash
+# test-vid2mos.sh - test vid2mos-hardened.sh against synthetic media.
+#
+# Usage:
+#   ./test-vid2mos.sh [--script PATH] [--bin-dir DIR] [--compare ORIGINAL_SCRIPT]
+#
+#   --script   script under test           (default: vid2mos-hardened.sh beside this file)
+#   --bin-dir  folder with ffmpeg+ffprobe  (default: /usr/local/aw/bin, P5's own build)
+#   --compare  also run the ORIGINAL script on every case and print what it does
+#              (informational only, never counts as pass/fail)
+#
+# Everything runs in a private temp folder; nothing in /Library or the real /tmp
+# preview area is touched. Exit status is 0 only if every check passes.
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT="$HERE/vid2mos-hardened.sh"
+BIN_DIR="/usr/local/aw/bin"
+ORIGINAL=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --script)  SCRIPT="$2"; shift 2;;
+        --bin-dir) BIN_DIR="$2"; shift 2;;
+        --compare) ORIGINAL="$2"; shift 2;;
+        *) echo "unknown option: $1"; exit 2;;
+    esac
+done
+
+FFMPEG="$BIN_DIR/ffmpeg"
+[ -x "$SCRIPT" ] || { echo "script not executable: $SCRIPT"; exit 2; }
+[ -x "$FFMPEG" ] || { echo "ffmpeg not found at $FFMPEG (use --bin-dir)"; exit 2; }
+
+WORK="$(mktemp -d /tmp/vid2mos-test.XXXXXX)" || exit 2
+trap 'rm -rf "$WORK"' EXIT
+MEDIA="$WORK/media"; OUT="$WORK/out"; mkdir -p "$MEDIA" "$OUT"
+
+pass=0; fail=0
+ok()   { pass=$((pass+1)); printf '  PASS  %s\n' "$1"; }
+bad()  { fail=$((fail+1)); printf '  FAIL  %s\n' "$1"; }
+check() { if eval "$2"; then ok "$1"; else bad "$1"; fi; }
+
+# Run the script under test. Sets: OUTTXT ERRTXT RC SECS. Extra env can be put before the call.
+run() {
+    local start=$SECONDS
+    OUTTXT=$("$SCRIPT" "$@" 2> "$WORK/stderr.txt" < /dev/null)
+    RC=$?
+    SECS=$(( SECONDS - start ))
+    ERRTXT=$(cat "$WORK/stderr.txt")
+}
+export VID2MOS_BIN_DIR="$BIN_DIR" VID2MOS_TMP="$OUT" VID2MOS_LOG="$WORK/vid2mos.log"
+
+is_one_line()  { [ "$(printf '%s\n' "$OUTTXT" | grep -c .)" -eq 1 ]; }
+is_jpeg()      { [ -s "$1" ] && [ "$(head -c 2 "$1" | xxd -p)" = "ffd8" ]; }
+
+gen() {  # gen <file> <ffmpeg args...>   quiet synthetic media
+    local f="$1"; shift
+    "$FFMPEG" -nostdin -hide_banner -loglevel error -y "$@" "$f" || { echo "could not create $f"; exit 2; }
+}
+
+echo "Script under test : $SCRIPT"
+echo "ffmpeg            : $($FFMPEG -version 2>&1 | head -1)"
+echo "Working folder    : $WORK"
+echo
+
+# ----------------------------------------------------------------- media set
+gen "$MEDIA/normal.mp4"      -f lavfi -i "testsrc=duration=30:size=640x360:rate=25" -c:v mpeg4 -pix_fmt yuv420p
+gen "$MEDIA/short3s.mp4"     -f lavfi -i "testsrc=duration=3:size=640x360:rate=25"  -c:v mpeg4 -pix_fmt yuv420p
+gen "$MEDIA/five-frames.mp4" -f lavfi -i "testsrc=duration=0.2:size=320x180:rate=25" -c:v mpeg4 -pix_fmt yuv420p
+gen "$MEDIA/nocount.ts"      -f lavfi -i "testsrc=duration=20:size=640x360:rate=25" -c:v mpeg4 -pix_fmt yuv420p -f mpegts
+gen "$MEDIA/still.jpg"       -f lavfi -i "testsrc=size=320x240" -frames:v 1
+gen "$MEDIA/with space & ünï.mp4" -f lavfi -i "testsrc=duration=12:size=320x180:rate=25" -c:v mpeg4 -pix_fmt yuv420p
+mkdir -p "$MEDIA/a" "$MEDIA/b"
+gen "$MEDIA/a/clip.mp4" -f lavfi -i "testsrc=duration=12:size=320x180:rate=25" -c:v mpeg4 -pix_fmt yuv420p
+gen "$MEDIA/b/clip.mp4" -f lavfi -i "smptebars=duration=12:size=320x180:rate=25" -c:v mpeg4 -pix_fmt yuv420p
+echo "this is not a video" > "$MEDIA/notes.mp4"
+: > "$MEDIA/empty.mov"
+
+# --------------------------------------------------------------------- tests
+echo "1. Normal video"
+run "$MEDIA/normal.mp4"
+check "exit 0"                        '[ $RC -eq 0 ]'
+check "stdout is exactly one path"    'is_one_line'
+check "output is a real JPEG"         'is_jpeg "$OUTTXT"'
+check "stderr is empty"               '[ -z "$ERRTXT" ]'
+check "finished quickly (< 20 s)"     '[ $SECS -lt 20 ]'
+
+echo "2. Clip shorter than the 10 s seek point (3 s)"
+run "$MEDIA/short3s.mp4"
+check "exit 0 and JPEG produced"      '[ $RC -eq 0 ] && is_jpeg "$OUTTXT"'
+check "stderr is empty"               '[ -z "$ERRTXT" ]'
+
+echo "3. Very short clip (5 frames, fewer than the 12 tiles)"
+run "$MEDIA/five-frames.mp4"
+check "exit 0 and JPEG produced"      '[ $RC -eq 0 ] && is_jpeg "$OUTTXT"'
+
+echo "4. Container without a frame count (MPEG-TS)"
+run "$MEDIA/nocount.ts"
+check "exit 0 and JPEG produced"      '[ $RC -eq 0 ] && is_jpeg "$OUTTXT"'
+check "stderr is empty"               '[ -z "$ERRTXT" ]'
+
+echo "5. Still image"
+run "$MEDIA/still.jpg"
+check "exit 0 and JPEG produced"      '[ $RC -eq 0 ] && is_jpeg "$OUTTXT"'
+
+echo "6. Name with spaces, ampersand and non-ASCII characters"
+run "$MEDIA/with space & ünï.mp4"
+check "exit 0 and JPEG produced"      '[ $RC -eq 0 ] && is_jpeg "$OUTTXT"'
+
+echo "7. Same file name in two folders must not collide"
+run "$MEDIA/a/clip.mp4"; first="$OUTTXT"; rc1=$RC
+run "$MEDIA/b/clip.mp4"; second="$OUTTXT"; rc2=$RC
+check "both succeed"                  '[ $rc1 -eq 0 ] && [ $rc2 -eq 0 ]'
+check "output paths differ"           '[ -n "$first" ] && [ "$first" != "$second" ]'
+
+echo "8. Missing file"
+run "$MEDIA/does-not-exist.mp4"
+check "exit 1"                        '[ $RC -eq 1 ]'
+check "stdout empty"                  '[ -z "$OUTTXT" ]'
+check "stderr empty (P5 forbids it)"  '[ -z "$ERRTXT" ]'
+
+echo "9. No argument"
+run
+check "exit 1, stdout and stderr empty" '[ $RC -eq 1 ] && [ -z "$OUTTXT" ] && [ -z "$ERRTXT" ]'
+
+echo "10. Text file and empty file named like videos"
+run "$MEDIA/notes.mp4"
+check "text file: exit 1, stdout empty, stderr empty" '[ $RC -eq 1 ] && [ -z "$OUTTXT" ] && [ -z "$ERRTXT" ]'
+run "$MEDIA/empty.mov"
+check "empty file: exit 1, stdout empty, stderr empty" '[ $RC -eq 1 ] && [ -z "$OUTTXT" ] && [ -z "$ERRTXT" ]'
+
+echo "11. Stdin held open by the caller (must not wait for it)"
+# A FIFO whose writer never closes: reading from it would block until the writer exits.
+mkfifo "$WORK/held-open"
+sleep 30 > "$WORK/held-open" &
+holder=$!
+start=$SECONDS
+OUTTXT=$("$SCRIPT" "$MEDIA/normal.mp4" 2>/dev/null < "$WORK/held-open")
+RC=$?; SECS=$((SECONDS-start))
+kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
+check "returns without waiting on stdin (< 15 s)" '[ $SECS -lt 15 ] && [ $RC -eq 0 ]'
+
+echo "12. Hung ffmpeg: watchdog must kill it and return"
+FAKE="$WORK/fakebin"; mkdir -p "$FAKE"
+cp "$BIN_DIR/ffprobe" "$FAKE/ffprobe"
+printf '#!/bin/sh\nsleep 60\n' > "$FAKE/ffmpeg"; chmod +x "$FAKE/ffmpeg"
+start=$SECONDS
+OUTTXT=$(VID2MOS_BIN_DIR="$FAKE" VID2MOS_TIMEOUT=3 "$SCRIPT" "$MEDIA/normal.mp4" 2>"$WORK/stderr.txt")
+RC=$?; SECS=$((SECONDS-start)); ERRTXT=$(cat "$WORK/stderr.txt")
+check "exit 1, stdout empty, stderr empty" '[ $RC -eq 1 ] && [ -z "$OUTTXT" ] && [ -z "$ERRTXT" ]'
+check "returned within 12 s of a 3 s limit" '[ $SECS -le 12 ]'
+check "no leftover fake ffmpeg process"     '! pgrep -f "$FAKE/ffmpeg" >/dev/null'
+
+echo "13. Hung ffprobe: watchdog must kill it and the run must still end"
+printf '#!/bin/sh\nsleep 60\n' > "$FAKE/ffprobe"; chmod +x "$FAKE/ffprobe"
+cp "$FFMPEG" "$FAKE/ffmpeg"
+start=$SECONDS
+OUTTXT=$(VID2MOS_BIN_DIR="$FAKE" VID2MOS_PROBE_TIMEOUT=3 "$SCRIPT" "$MEDIA/normal.mp4" 2>"$WORK/stderr.txt")
+RC=$?; SECS=$((SECONDS-start))
+check "ends within 25 s (probe limit 3 s per call)" '[ $SECS -le 25 ]'
+check "stderr empty"                                '[ ! -s "$WORK/stderr.txt" ]'
+check "no leftover fake ffprobe process"            '! pgrep -f "$FAKE/ffprobe" >/dev/null'
+
+echo "14. Logging"
+check "log file written"                    '[ -s "$WORK/vid2mos.log" ]'
+check "log records the host name"           'grep -q "host=$(hostname -s)" "$WORK/vid2mos.log"'
+check "log has OK and FAIL lines"           'grep -q " OK " "$WORK/vid2mos.log" && grep -q " FAIL " "$WORK/vid2mos.log"'
+check "log names the input file"            'grep -q "does-not-exist.mp4" "$WORK/vid2mos.log"'
+check "every run logs a START line"        '[ "$(grep -c " START " "$WORK/vid2mos.log")" -ge 10 ]'
+check "timestamp has date, time, seconds and UTC offset" 'grep -Eq "^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} [+-][0-9]{4} host=" "$WORK/vid2mos.log"'
+check "hung ffmpeg is logged as TIMED OUT"  'grep -q "TIMED OUT" "$WORK/vid2mos.log"'
+check "corrupt file is NOT logged as a timeout" '! grep "notes.mp4" "$WORK/vid2mos.log" | grep -q "TIMED OUT"'
+check "corrupt file is logged as an ffmpeg failure" 'grep "notes.mp4" "$WORK/vid2mos.log" | grep -q "ffmpeg failed\|no preview produced"'
+
+echo "15. Log summary tool"
+SUM="$HERE/vid2mos-log-summary.sh"
+if [ -x "$SUM" ]; then
+    cp "$WORK/vid2mos.log" "$WORK/sum.log"
+    echo "2026-11-22 10:00:00 -0700 host=testhost user=root pid=99999 START input=\"/x/never-finished.mov\" script=s bin=b" >> "$WORK/sum.log"
+    summary=$("$SUM" "$WORK/sum.log" 2>&1)
+    check "summary lists this host with OK and FAIL counts" 'printf "%s" "$summary" | grep -q "$(hostname -s)"'
+    check "summary reports an unfinished run"               'printf "%s" "$summary" | grep -q "never finished (hung, killed, or still running): [1-9]"'
+    check "summary shows the unfinished input"              'printf "%s" "$summary" | grep -q "never-finished.mov"'
+    check "summary shows the hung-ffmpeg timeout"           'printf "%s" "$summary" | grep -q "TIMED OUT"'
+    # pid reuse: an earlier START that never finished must not be hidden by a later run with the same pid
+    printf '%s\n' \
+      "2026-11-20 09:00:00 -0700 host=testhost user=root pid=4242 START input=\"/x/hung-on-day1.mov\" script=s bin=b" \
+      "2026-11-22 09:00:00 -0700 host=testhost user=root pid=4242 START input=\"/x/fine-on-day3.mov\" script=s bin=b" \
+      "2026-11-22 09:00:01 -0700 host=testhost user=root pid=4242 OK (1s) frames=1 via=nb_frames interval=1 input=\"/x/fine-on-day3.mov\" output=\"o\"" > "$WORK/reuse.log"
+    reuse=$("$SUM" "$WORK/reuse.log" 2>&1)
+    check "pid reuse does not hide an earlier unfinished run" 'printf "%s" "$reuse" | grep -q "hung-on-day1.mov"'
+    check "a finished run is not reported as unfinished"      '! printf "%s" "$reuse" | grep -q "fine-on-day3.mov\" script"'
+else
+    bad "vid2mos-log-summary.sh not found beside the test script"
+fi
+
+echo "16. Daily log files and pruning"
+LD="$WORK/logs"; mkdir -p "$LD"
+touch -t 202601010000 "$LD/vid2mos-2026-01-01.log"                       # far older than 30 days
+recent=$(date -v-5d +%Y-%m-%d); touch "$LD/vid2mos-$recent.log"          # 5 days old: must stay
+env -u VID2MOS_LOG VID2MOS_LOG_DIR="$LD" "$SCRIPT" "$MEDIA/normal.mp4" >/dev/null 2>&1
+today="$LD/vid2mos-$(date +%Y-%m-%d).log"
+check "today's file is vid2mos-YYYY-MM-DD.log"    '[ -s "$today" ]'
+check "log lines went to the daily file"           'grep -q " OK " "$today"'
+check "file older than 30 days was pruned"         '[ ! -e "$LD/vid2mos-2026-01-01.log" ]'
+check "recent daily file was kept"                 '[ -e "$LD/vid2mos-$recent.log" ]'
+if [ -x "$SUM" ]; then
+    summary=$("$SUM" "$LD" 2>&1)
+    check "summary reads a folder of daily logs"   'printf "%s" "$summary" | grep -q "$(hostname -s)"'
+fi
+
+echo
+echo "Result: $pass passed, $fail failed"
+
+# ------------------------------------------------------- original, for contrast
+if [ -n "$ORIGINAL" ]; then
+    echo
+    echo "Original script, same media (informational):"
+    export AWPST_SRV_HOME; AWPST_SRV_HOME="$(dirname "$BIN_DIR")"
+    for f in normal.mp4 short3s.mp4 five-frames.mp4 nocount.ts still.jpg notes.mp4 does-not-exist.mp4; do
+        o=$("$ORIGINAL" "$MEDIA/$f" 2>"$WORK/o_err.txt" < /dev/null); r=$?
+        e=$(head -c 90 "$WORK/o_err.txt" | tr '\n' ' ')
+        j="no"; [ -n "$o" ] && is_jpeg "$o" && j="yes"
+        printf '  %-18s exit=%s  printed-path=%s  real-jpeg=%s  stderr="%s"\n' "$f" "$r" "$([ -n "$o" ] && echo yes || echo no)" "$j" "$e"
+        [ -n "$o" ] && rm -f "$o"
+    done
+fi
+
+[ $fail -eq 0 ]
