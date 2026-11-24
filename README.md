@@ -48,6 +48,7 @@ JPEG, on success; stderr empty; exit 0 or 1.
 | `test-vid2mos.sh` | 47 checks on synthetic media. `--compare <original>` also shows what the original does on the same inputs |
 | `batch-vid2mos.sh` | Runs the script over a folder of real media with a per-file report |
 | `vid2mos-log-summary.sh` | Summarises the daily logs: totals per host, runs per minute, unfinished runs, latest failures |
+| `TESTING.md` | How to test the scripts, what to record, and findings so far |
 
 ## Standalone use
 
