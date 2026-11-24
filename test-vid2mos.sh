@@ -209,6 +209,48 @@ if [ -x "$SUM" ]; then
 fi
 
 echo
+echo "Shared log copy, --version, --selftest"
+SH="$WORK/shared"; mkdir -p "$SH"
+HN=$(hostname -s)
+VID2MOS_SHARED_DIR="$SH" run "$MEDIA/short3s.mp4"
+sf="$SH/vid2mos-$HN-$(date +%Y-%m-%d).log"
+for _ in 1 2 3 4 5 6; do [ -s "$sf" ] && grep -q " OK " "$sf" && break; sleep 0.5; done
+check "shared file is vid2mos-<host>-YYYY-MM-DD.log" '[ -s "$sf" ]'
+check "shared copy holds START and OK"               'grep -q " START " "$sf" && grep -q " OK " "$sf"'
+check "run is unchanged: one-line JPEG path, no stderr" 'is_one_line && is_jpeg "$OUTTXT" && [ -z "$ERRTXT" ]'
+check "shared lines match the local log"             '[ "$(grep -c "pid=" "$sf")" -le "$(grep -c "pid=" "$WORK/vid2mos.log")" ] && grep -q "$(sed -n "s/.*pid=\([0-9]*\) .*/\1/p" "$sf" | tail -1)" "$WORK/vid2mos.log"'
+
+VID2MOS_SHARED_DIR="$WORK/no-such-share" run "$MEDIA/short3s.mp4"
+check "missing shared folder never fails the run"    '[ $RC -eq 0 ] && is_jpeg "$OUTTXT"'
+check "missing shared folder adds no stderr"         '[ -z "$ERRTXT" ]'
+check "missing shared folder is not created"         '[ ! -e "$WORK/no-such-share" ]'
+
+chmod 555 "$SH"
+VID2MOS_SHARED_DIR="$SH" run "$MEDIA/short3s.mp4"
+chmod 755 "$SH"
+check "read-only shared folder never fails the run"  '[ $RC -eq 0 ] && is_jpeg "$OUTTXT" && [ -z "$ERRTXT" ]'
+
+# A stalled share must not delay the run: a FIFO with no reader blocks any write to it.
+mkdir -p "$WORK/stuck"; mkfifo "$WORK/stuck/vid2mos-$HN-$(date +%Y-%m-%d).log"
+VID2MOS_SHARED_DIR="$WORK/stuck" run "$MEDIA/short3s.mp4"
+check "blocked shared write does not delay the run"  '[ $RC -eq 0 ] && [ "$SECS" -le 5 ] && is_jpeg "$OUTTXT"'
+pkill -f "vid2mos-$HN-$(date +%Y-%m-%d).log" 2>/dev/null
+exec 9<>"$WORK/stuck/vid2mos-$HN-$(date +%Y-%m-%d).log"; exec 9>&-   # release any stuck writers
+
+check "--version prints the version"                 '"$SCRIPT" --version | grep -Eq "^vid2mos-hardened [0-9]+\.[0-9]+\.[0-9]+$"'
+: > "$WORK/vid2mos.log"
+st=$("$SCRIPT" --selftest "$MEDIA/normal.mp4" 2>&1); strc=$?
+check "--selftest passes on a healthy machine"       '[ $strc -eq 0 ] && printf "%s" "$st" | grep -q "^result=PASS$"'
+check "--selftest reports key=value lines"           'printf "%s" "$st" | grep -q "^ffmpeg=ok$" && printf "%s" "$st" | grep -q "^source_readable=ok$"'
+check "--selftest writes no log line"                '[ ! -s "$WORK/vid2mos.log" ]'
+st=$("$SCRIPT" --selftest "$MEDIA/does-not-exist.mp4" 2>&1); strc=$?
+check "--selftest fails on an unreadable source"     '[ $strc -eq 1 ] && printf "%s" "$st" | grep -q "^source_readable=FAIL$" && printf "%s" "$st" | grep -q "^result=FAIL$"'
+st=$(VID2MOS_BIN_DIR="$WORK/none" "$SCRIPT" --selftest 2>&1); strc=$?
+check "--selftest fails when ffmpeg is missing"      '[ $strc -eq 1 ] && printf "%s" "$st" | grep -q "^ffmpeg=FAIL$"'
+st=$(VID2MOS_SHARED_DIR="$WORK/no-such-share" "$SCRIPT" --selftest 2>&1); strc=$?
+check "--selftest fails on an unwritable shared dir" '[ $strc -eq 1 ] && printf "%s" "$st" | grep -q "^shared_dir_writable=FAIL$"'
+
+echo
 echo "Result: $pass passed, $fail failed"
 
 # ------------------------------------------------------- original, for contrast

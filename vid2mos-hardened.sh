@@ -23,6 +23,17 @@
 #   * The output file name includes a short hash of the input path, so two files with
 #     the same name in different folders cannot overwrite each other's preview.
 #   * The result is checked: a missing or empty JPG is a failure, not a printed path.
+#   * Optional second copy of the log in a shared folder (VID2MOS_SHARED_DIR), one file per
+#     host per day, so a monitor can read every machine's runs from one place. The copy is
+#     best effort: it is written in the background and can never delay or fail a run.
+#   * --version and --selftest [source-path] for pre-flight checks (see below).
+#
+# Modes besides a normal run (neither is used by P5; both write to stdout):
+#   --version              print the script version
+#   --selftest [path]      check this machine: ffmpeg/ffprobe, temp and log folders, the shared
+#                          folder (when set) and, if a path is given, that it is readable.
+#                          Prints key=value lines and ends with result=PASS or result=FAIL.
+#                          Exit 0 on PASS. Writes no START line and no preview.
 #
 # Environment (all optional):
 #   VID2MOS_BIN_DIR        folder holding ffmpeg + ffprobe (tests / non-standard installs)
@@ -31,10 +42,17 @@
 #   VID2MOS_LOG_DIR        folder for the daily logs (default /var/log if writable, else /tmp)
 #   VID2MOS_KEEP_DAYS      days of daily logs to keep (default 30)
 #   VID2MOS_LOG            pin ONE fixed log file instead of daily files (tests)
+#   VID2MOS_SHARED_DIR     also copy every log line to $VID2MOS_SHARED_DIR/vid2mos-<host>-YYYY-MM-DD.log
 #   VID2MOS_TIMEOUT        ffmpeg limit, seconds
 #   VID2MOS_PROBE_TIMEOUT  ffprobe limit, seconds
 
+VERSION="1.1.0"
+MODE=""
 VERBOSE=""
+case "$1" in
+    --version)  MODE=version; shift;;
+    --selftest) MODE=selftest; shift;;
+esac
 if [ "$1" = "-v" ]; then
     VERBOSE=1
     shift
@@ -66,6 +84,7 @@ else
     fi
     LOG="$LOG_DIR/vid2mos-$(date +%Y-%m-%d).log"
 fi
+SHARED_DIR="${VID2MOS_SHARED_DIR:-}"
 FFMPEG_TIMEOUT="${VID2MOS_TIMEOUT:-120}"
 PROBE_TIMEOUT="${VID2MOS_PROBE_TIMEOUT:-30}"
 
@@ -78,6 +97,18 @@ HOST=$(hostname -s 2>/dev/null || echo unknown)
 START=$SECONDS
 
 # ----------------------------------------------------------------- logging
+# Second copy of a line in the shared folder. A share can be stale or unmounted, and a write to
+# one can block for a long time, so the write runs in a detached background job that nothing
+# waits for, with its output closed. At worst a few stuck writers pile up; the run itself is
+# never delayed and never fails because of the share. Lines from one run can land out of order
+# by a moment, so readers must pair START with OK/FAIL by host and pid, never by position.
+shared_copy() {
+    [ -n "$SHARED_DIR" ] || return 0
+    local f="$SHARED_DIR/vid2mos-$HOST-$(date +%Y-%m-%d).log"
+    ( printf '%s\n' "$1" >> "$f" ) > /dev/null 2>&1 < /dev/null &
+    return 0
+}
+
 # Never writes to stdout or stderr (P5 forbids it); -v echoes to stderr for shell tests.
 log() {
     local line
@@ -89,6 +120,7 @@ log() {
         mv -f "$LOG" "$LOG.1" 2>/dev/null
     fi
     printf '%s\n' "$line" >> "$LOG" 2>/dev/null
+    shared_copy "$line"
     logger -t vid2mos "host=$HOST pid=$$ $*" >/dev/null 2>&1
     [ -n "$VERBOSE" ] && printf '%s\n' "$line" >&2
     return 0
@@ -98,6 +130,53 @@ fail() {
     log "FAIL ($(( SECONDS - START ))s) $1 input=\"$input_file\""
     exit 1
 }
+
+# ------------------------------------------------------------- other modes
+if [ "$MODE" = "version" ]; then
+    echo "vid2mos-hardened $VERSION"
+    exit 0
+fi
+
+if [ "$MODE" = "selftest" ]; then
+    st_ok=1
+    st_check() {   # st_check <label> <test-command...> : prints label=ok or label=FAIL
+        local label=$1; shift
+        if "$@" 2>/dev/null; then echo "$label=ok"; else echo "$label=FAIL"; st_ok=0; fi
+    }
+    echo "version=$VERSION"
+    echo "host=$HOST"
+    echo "user=$(id -un)"
+    echo "script=$0"
+    echo "bin_dir=$AW_BIN"
+    st_check ffmpeg  test -x "$FFMPEG"
+    st_check ffprobe test -x "$FFPROBE"
+    st_check tmp_dir test -d "$TMP" -a -w "$TMP"
+    if [ -n "$LOG_DIR" ]; then
+        echo "log_dir=$LOG_DIR"
+        st_check log_dir_writable test -w "$LOG_DIR"
+    else
+        echo "log_file=$LOG"
+    fi
+    if [ -n "$SHARED_DIR" ]; then
+        echo "shared_dir=$SHARED_DIR"
+        # A stale mount can hang a test, so probe in the background and give it 5 s.
+        probe_mark="$TMP/.vid2mos-selftest.$$"
+        ( : > "$SHARED_DIR/.vid2mos-selftest-$HOST-$$" && rm -f "$SHARED_DIR/.vid2mos-selftest-$HOST-$$" && : > "$probe_mark" ) \
+            > /dev/null 2>&1 < /dev/null &
+        st_wait=0
+        while [ ! -e "$probe_mark" ] && [ "$st_wait" -lt 5 ]; do sleep 1; st_wait=$(( st_wait + 1 )); done
+        if [ -e "$probe_mark" ]; then echo "shared_dir_writable=ok"; rm -f "$probe_mark"
+        else echo "shared_dir_writable=FAIL"; st_ok=0; fi
+    else
+        echo "shared_dir=unset"
+    fi
+    if [ -n "$input_file" ]; then
+        echo "source=$input_file"
+        st_check source_readable test -r "$input_file"
+    fi
+    if [ "$st_ok" = 1 ]; then echo "result=PASS"; exit 0; fi
+    echo "result=FAIL"; exit 1
+fi
 
 log "START input=\"$input_file\" script=$0 bin=$AW_BIN"
 

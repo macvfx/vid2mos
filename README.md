@@ -34,6 +34,13 @@ silently:
   so an offline or slow source cannot hang the run or hold P5's pipes open.
 - **Short clips and stills** retry without a seek instead of producing nothing.
 - **Frame count fallback**: `nb_frames`, then duration x frame rate, then the first frames.
+- **Optional shared copy of the log**: set `VID2MOS_SHARED_DIR` and every log line is also written to
+  `vid2mos-<host>-YYYY-MM-DD.log` there, so one monitor can read every machine's runs from one place.
+  The copy is written in the background and can never delay or fail a run, even if the share is
+  stale or unmounted. Lines can land slightly out of order, so pair START with OK/FAIL by host and pid.
+- **Pre-flight checks**: `--version`, and `--selftest [path]`, which checks ffmpeg, ffprobe, the temp
+  and log folders, the shared folder and (optionally) that a source path is readable. It prints
+  `key=value` lines and ends with `result=PASS` or `result=FAIL`.
 - **Unique output names** (a short hash of the input path), so same-named files in different
   folders do not overwrite each other.
 
@@ -45,7 +52,7 @@ JPEG, on success; stderr empty; exit 0 or 1.
 | File | Purpose |
 |---|---|
 | `vid2mos-hardened.sh` | The preview script (drop-in replacement for `vid2mos.sh`) |
-| `test-vid2mos.sh` | 47 checks on synthetic media. `--compare <original>` also shows what the original does on the same inputs |
+| `test-vid2mos.sh` | 63 checks on synthetic media. `--compare <original>` also shows what the original does on the same inputs |
 | `batch-vid2mos.sh` | Runs the script over a folder of real media with a per-file report |
 | `vid2mos-log-summary.sh` | Summarises the daily logs: totals per host, runs per minute, unfinished runs, latest failures |
 | `TESTING.md` | How to test the scripts, what to record, and findings so far |
@@ -62,7 +69,7 @@ install), or from `$AWPST_SRV_HOME/bin` when P5 sets it. For any other install, 
 
 Optional environment variables: `VID2MOS_BIN_DIR`, `VID2MOS_TMP` (output folder, default `/tmp`),
 `VID2MOS_LOG_DIR`, `VID2MOS_KEEP_DAYS`, `VID2MOS_LOG` (one fixed file), `VID2MOS_TIMEOUT`,
-`VID2MOS_PROBE_TIMEOUT`.
+`VID2MOS_PROBE_TIMEOUT`, `VID2MOS_SHARED_DIR`.
 
 ## Use with Archiware P5
 
@@ -82,6 +89,12 @@ client's log. A client that lacks the script, or cannot read the source path, pr
 "couldn't execute" warnings. The `host=` field in each log line shows which machine ran each
 preview.
 
+Check a machine before a job (no preview is made and no log line is written):
+
+```bash
+/Library/Scripts/vid2mos-hardened.sh --selftest /path/to/a/source/file
+```
+
 Read the logs with:
 
 ```bash
@@ -91,7 +104,7 @@ sudo ./vid2mos-log-summary.sh --since "2026-11-22 09:00"
 
 ## Tested
 
-- 47 checks on synthetic media with P5's bundled ffmpeg 7.1 and macOS's stock `/bin/bash` 3.2.
+- 63 checks on synthetic media with P5's bundled ffmpeg 7.1 and macOS's stock `/bin/bash` 3.2.
 - A real Archive job on P5 8.0.6 (macOS): previews created, no warnings in the server log.
 - A P5 preview client with a read-only source mounted: all runs logged OK and the previews
   appeared in the P5 web interface.
