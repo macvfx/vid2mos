@@ -123,7 +123,16 @@ sudo ./vid2mos-log-summary.sh --since "2026-11-22 09:00"
 - A P5 preview client with a read-only source mounted: all runs logged OK and the previews
   appeared in the P5 web interface.
 
-Not tested at large scale (hundreds of files) or with a missing script on a client.
+- At scale: a real job of 2,640 files across three preview clients ran to the end. P5 loaded 2,254
+  and skipped 386; the clients' failed counts matched the server's warnings, and every failure was
+  logged with its reason.
+- A script P5 cannot start on a client (a missing script path gives `couldn't execute`, as the
+  earlier test showed): on a real server P5 logged that warning for each file and carried on.
+  Batches with hundreds of those warnings (up to 1,909 in one batch) finished and skipped the
+  previews, so the server does not wait forever. The cause of each of those was not checked. One
+  batch with 257 such warnings never logged a finish and the reason is unknown.
+
+Not tested: a preview client dropping off the network in the middle of a job.
 
 ## Credit and licence
 

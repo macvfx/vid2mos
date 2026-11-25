@@ -55,13 +55,20 @@ client's log too.
 - **Read-only source is fine:** a client generated previews from read-only mounted storage.
 - **Retries are normal:** for clips under 10 s the first ffmpeg call exits non-zero and the log
   shows `retry without seek`, then `OK`.
+- **Large job, several clients:** a real job of 2,640 files across three preview clients finished.
+  P5 loaded 2,254 and skipped 386. The clients' failed counts matched the server's warnings, and
+  the skips were files missing on disk or previews that could not be made.
+- **A script P5 cannot start does not stall P5:** on a real server, batches with hundreds of
+  `couldn't execute` warnings (up to 1,909 in one batch, 762 of 1,341 files in another) finished
+  normally and skipped those previews. The cause of each was not checked; a missing script path is
+  the one reproduced earlier. One batch with 257 such warnings has no finish line in the server log; why
+  is not known (a P5 restart or a cancelled job would look the same).
 - **Timeouts:** the log says `TIMED OUT` only when the watchdog fired; a corrupt file is reported
   as an ffmpeg failure.
 
 ## 5. Not yet tested
 
-- A job with hundreds of files, many of them short clips.
-- A missing script path on a preview client (does the server wait forever?).
+- A large job made mostly of short clips.
 - A preview client dropping off the network mid-job.
 
 ## 6. Cleanup
