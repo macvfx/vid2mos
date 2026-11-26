@@ -24,6 +24,7 @@
 #   results.tsv   n toolchain result seconds rc jpeg_bytes jpeg reason size_bytes codec width
 #                 height duration path      (result: ok, fail, missing, symlink)
 #   state         "running D T" while it runs, then "done D T" or "stopped D T" (D rows of T files)
+#   current       the file being worked on now: n, toolchain, start (epoch seconds), path
 #   pid           this runner's process id
 #   run.log       the script's own log for this run (test mode: the daily log is never touched)
 #   ffmpeg/       ffmpeg's error log for each failure, <n>-<toolchain>.log
@@ -97,6 +98,7 @@ on_term() {
     [ -n "$child" ] && kill -TERM "$child" 2>/dev/null
     pkill -TERM -f -- "$WORK/" 2>/dev/null      # the ffmpeg/ffprobe writing into this run
     printf 'stopped %d %d\n' "$done_n" "$total" > "$RUN_DIR/state"
+    rm -f "$RUN_DIR/current"
     exit 143
 }
 trap on_term TERM INT HUP
@@ -137,6 +139,7 @@ while IFS= read -r f || [ -n "$f" ]; do
             label="${LABELS[$i]}"
             before=$( { wc -l < "$LOGF"; } 2>/dev/null || echo 0)
             start=$SECONDS
+            printf '%s\t%s\t%s\t%s\n' "$n" "$label" "$(date +%s)" "$(clean "$f")" > "$RUN_DIR/current"
             out="$WORK/.out.$$"
             VID2MOS_FFMPEG="${FFMPEGS[$i]}" VID2MOS_FFPROBE="${FFPROBES[$i]}" "$SCRIPT" "$f" > "$out" 2>/dev/null < /dev/null &
             child=$!; wait "$child"; rc=$?; child=""
@@ -166,6 +169,7 @@ while IFS= read -r f || [ -n "$f" ]; do
         done
     fi
     done_n=$n
+    rm -f "$RUN_DIR/current"
     printf 'running %d %d\n' "$done_n" "$total" > "$RUN_DIR/state"
 done < "$LIST"
 
@@ -174,5 +178,5 @@ if [ -e "$RUN_DIR/stop" ]; then
 else
     printf 'done %d %d\n' "$done_n" "$total" > "$RUN_DIR/state"
 fi
-rm -f "$RUN_DIR/pid"
+rm -f "$RUN_DIR/pid" "$RUN_DIR/current"
 exit 0

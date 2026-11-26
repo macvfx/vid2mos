@@ -343,7 +343,7 @@ if [ -x "$RUNNER" ]; then
     printf '%s\n' "$RD/media/it's here.mp4" "$RD/media/link.mp4" "$RD/media/gone.mp4" > "$RD/list"
     "$RUNNER" --run-dir "$RD/a" --list "$RD/list" --mode fallback --script "$SCRIPT" \
         --toolchain "Fake=$FK/ffmpeg:$BIN_DIR/ffprobe" --toolchain "Real=$BIN_DIR/ffmpeg:$BIN_DIR/ffprobe" --keep-jpegs > /dev/null 2>&1; rrc=$?
-    check "runner finishes and says done"                '[ $rrc -eq 0 ] && grep -q "^done 3 3" "$RD/a/state"'
+    check "runner finishes and says done"                '[ $rrc -eq 0 ] && grep -q "^done 3 3" "$RD/a/state" && [ ! -e "$RD/a/current" ]'
     check "a failing ffmpeg falls back to the next"      'awk -F"\t" "\$2==\"Fake\" && \$3==\"fail\"" "$RD/a/results.tsv" | grep -q "rc=234" && awk -F"\t" "\$2==\"Real\" && \$3==\"ok\"" "$RD/a/results.tsv" | grep -q .'
     check "the failure keeps its ffmpeg log"             '[ -s "$RD/a/ffmpeg/1-Fake.log" ]'
     check "the preview is kept and is a JPEG"            'j=$(awk -F"\t" "\$3==\"ok\" {print \$7}" "$RD/a/results.tsv"); [ "$(head -c 2 "$j" | xxd -p)" = "ffd8" ]'
@@ -352,7 +352,9 @@ if [ -x "$RUNNER" ]; then
     "$RUNNER" --run-dir "$RD/b" --list "$RD/list" --script "$SCRIPT" --toolchain "Slow=$RD/slow:$BIN_DIR/ffprobe" --timeout 2 > /dev/null 2>&1
     check "--timeout reaches the script"                 'grep -q "TIMED OUT after 2s" "$RD/b/results.tsv"'
     "$RUNNER" --run-dir "$RD/c" --list "$RD/list" --script "$SCRIPT" --toolchain "Slow=$RD/slow:$BIN_DIR/ffprobe" --timeout 60 > /dev/null 2>&1 & rp=$!
-    sleep 3; kill -TERM $rp; wait $rp 2>/dev/null; sleep 1
+    sleep 3
+    check "the file in progress is named in current"     'awk -F"\t" "\$2==\"Slow\" && \$3 ~ /^[0-9]+\$/" "$RD/c/current" | grep -q "here.mp4"'
+    kill -TERM $rp; wait $rp 2>/dev/null; sleep 1
     check "stopping marks the run and kills its ffmpeg"  'grep -q "^stopped" "$RD/c/state" && ! pgrep -f "$RD/slow" > /dev/null'
     "$RUNNER" --run-dir "$RD/d" --list "$RD/list" --script "$SCRIPT" --toolchain "Bad=relative/ffmpeg:/x" > /dev/null 2>&1; rrc=$?
     check "a relative toolchain path is refused"         '[ $rrc -eq 2 ] && grep -q "^error" "$RD/d/state"'
