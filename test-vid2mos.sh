@@ -320,6 +320,7 @@ if [ -x "$PREP" ]; then
     check "--check changes nothing and reports FIX"       '[ ! -e "$PD/inst.sh" ] && [ $prc -eq 1 ] && printf "%s" "$out" | grep -q "FIX   not installed"'
     out=$("$PREP" --dest "$PD/inst.sh" --bin-dir "$BIN_DIR" --source "$MEDIA/normal.mp4" 2>&1); prc=$?
     check "install succeeds and says Ready"               '[ $prc -eq 0 ] && printf "%s" "$out" | grep -q "^Ready\."'
+    check "a fresh install prints no FIX line"            '! printf "%s" "$out" | grep -q "FIX"'
     check "installed copy is identical and executable"    'cmp -s "$HERE/vid2mos-hardened.sh" "$PD/inst.sh" && [ -x "$PD/inst.sh" ]'
     check "installed mode is 755"                         '[ "$(stat -f %Lp "$PD/inst.sh")" = "755" ]'
     check "source path was checked"                       'printf "%s" "$out" | grep -q "source_readable=ok"'
@@ -328,6 +329,15 @@ if [ -x "$PREP" ]; then
     echo "# local edit" >> "$PD/inst.sh"
     out=$("$PREP" --dest "$PD/inst.sh" --bin-dir "$BIN_DIR" 2>&1); prc=$?
     check "a different installed copy is replaced"        '[ $prc -eq 0 ] && cmp -s "$HERE/vid2mos-hardened.sh" "$PD/inst.sh"'
+    check "replacing says so, without a FIX line"         'printf "%s" "$out" | grep -q "replacing it" && ! printf "%s" "$out" | grep -q "FIX"'
+    out=$("$PREP" --check --dest "$PD/inst.sh" --bin-dir "$BIN_DIR" 2>&1); prc=$?
+    echo "# drift" >> "$PD/inst.sh"
+    out=$("$PREP" --check --dest "$PD/inst.sh" --bin-dir "$BIN_DIR" 2>&1); prc=$?
+    check "--check still reports an outdated copy as FIX" '[ $prc -eq 1 ] && printf "%s" "$out" | grep -q "FIX   installed copy" && grep -q "# drift" "$PD/inst.sh"'
+    mkdir -p "$PD/ro"; chmod 555 "$PD/ro"
+    out=$("$PREP" --dest "$PD/ro/inst.sh" --bin-dir "$BIN_DIR" 2>&1); prc=$?
+    chmod 755 "$PD/ro"
+    check "a failed install is FIX and exits 1"           '[ $prc -eq 1 ] && printf "%s" "$out" | grep -q "FIX   could not write"'
     check "the replaced copy is kept as .previous"        'grep -q "local edit" "$PD/inst.sh.previous"'
     out=$("$PREP" --dest "$PD/inst.sh" --bin-dir "$WORK/no-tools" 2>&1); prc=$?
     check "missing ffmpeg is reported and fails"          '[ $prc -eq 1 ] && printf "%s" "$out" | grep -q "FIX   .*ffmpeg is missing"'

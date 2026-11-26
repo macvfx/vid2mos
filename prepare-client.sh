@@ -56,18 +56,28 @@ fi
 src_ver="$(version_of "$SRC")"
 [ -n "$src_ver" ] && ok "source script is version $src_ver" || { warn "the source script does not answer --version"; exit 1; }
 
+# --check reports what is out of date as FIX. A normal run says what it is about to replace
+# and FIX appears only if that replacement fails.
+NEED_INSTALL=""
+dest_ver=""
 if [ -f "$DEST" ]; then
     dest_ver="$(version_of "$DEST")"
     if cmp -s "$SRC" "$DEST"; then
         ok "installed copy at $DEST is current ($dest_ver)"
-        NEED_INSTALL=""
     else
-        warn "installed copy at $DEST is ${dest_ver:-unknown}, not the version here ($src_ver)"
         NEED_INSTALL=1
+        if [ -n "$CHECK" ]; then
+            warn "installed copy at $DEST is ${dest_ver:-unknown}, not the version here ($src_ver)"
+        elif [ "$dest_ver" = "$src_ver" ]; then
+            note "installed copy at $DEST is $dest_ver but differs from the copy here: replacing it"
+        else
+            note "replacing installed copy at $DEST (${dest_ver:-unknown version}) with $src_ver"
+        fi
     fi
 else
-    warn "not installed at $DEST"
     NEED_INSTALL=1
+    if [ -n "$CHECK" ]; then warn "not installed at $DEST"
+    else note "not installed at $DEST yet: installing $src_ver"; fi
 fi
 
 if [ -n "$NEED_INSTALL" ] && [ -z "$CHECK" ]; then
@@ -77,11 +87,10 @@ if [ -n "$NEED_INSTALL" ] && [ -z "$CHECK" ]; then
     if cp "$SRC" "$DEST" 2>/dev/null && chmod 755 "$DEST" 2>/dev/null; then
         xattr -c "$DEST" 2>/dev/null
         [ "$(id -u)" -eq 0 ] && chown root:wheel "$DEST" 2>/dev/null
-        problems=$((problems-1))
         ok "installed $DEST (version $(version_of "$DEST"))"
         [ -f "$DEST.previous" ] && note "the previous copy is kept as $DEST.previous"
     else
-        note "could not write $DEST: run this with sudo"
+        warn "could not write $DEST: run this with sudo"
     fi
 fi
 [ "$(id -u)" -eq 0 ] || [ -n "$CHECK" ] || note "(not running as root: fine for a test, but P5 runs the script as root)"

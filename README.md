@@ -52,7 +52,7 @@ JPEG, on success; stderr empty; exit 0 or 1.
 | File | Purpose |
 |---|---|
 | `vid2mos-hardened.sh` | The preview script (drop-in replacement for `vid2mos.sh`) |
-| `test-vid2mos.sh` | 96 checks on synthetic media. `--compare <original>` also shows what the original does on the same inputs |
+| `test-vid2mos.sh` | 100 checks on synthetic media. `--compare <original>` also shows what the original does on the same inputs |
 | `batch-vid2mos.sh` | Runs the script over a folder of real media with a per-file report |
 | `vid2mos-log-summary.sh` | Summarises the daily logs: totals per host, runs per minute, unfinished runs, latest failures |
 | `prepare-client.sh` | One command to get a Mac ready: installs the script to `/Library/Scripts`, checks ffmpeg and Remote Login, runs `--selftest`. `--check` changes nothing |

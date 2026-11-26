@@ -25,3 +25,8 @@ Earlier versions (1.0.0, 1.1.0) are described in the git history and the README.
   runs the script in test mode, logs to `<report>.log`, and switches off the shared folder; with a
   1.1.0 script (no test mode) the log is still redirected, so the daily log stays clean either way.
 - `vid2mos-log-summary.sh` skips `mode=test` lines.
+- **`prepare-client.sh` printed `FIX` for a copy it was about to replace**, so an upgrade looked like
+  a problem even though the next line said it was installed. Cause: the version check reported
+  through the same "needs fixing" message in both modes. A normal run now says "replacing installed
+  copy (1.1.0) with 1.2.0"; `FIX` appears only with `--check`, or when the install itself fails
+  (which now also counts as a problem and exits 1, where before it was only a note).
