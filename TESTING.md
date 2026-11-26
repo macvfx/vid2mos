@@ -6,13 +6,16 @@ How to check the script on a machine, and what has been learned so far. Tested w
 ## 1. Quick checks (no P5 needed)
 
 ```bash
-./test-vid2mos.sh                              # 75 checks on synthetic media
+./test-vid2mos.sh                              # 96 checks on synthetic media
 ./test-vid2mos.sh --compare /path/to/original-vid2mos.sh   # also shows what the original does
 sudo ./batch-vid2mos.sh /path/to/copies-of-real-media      # per-file report, optional --original
 ```
 
-`test-vid2mos.sh` uses `/usr/local/aw/bin` for ffmpeg unless you pass `--bin-dir`. Test on
-**copies** of media. Run the batch as root to match how P5 runs the script. Each machine has its
+`test-vid2mos.sh` uses `/usr/local/aw/bin` for ffmpeg unless you pass `--bin-dir`.
+`batch-vid2mos.sh` reads the media in place and never changes it; it runs the script in test mode
+(1.2.0), so its runs go to a log next to the report and never into the daily log that P5's runs
+and the monitor use. Compare toolchains with `--ffmpeg` / `--ffprobe` or `--bin-dir`. Test on
+**copies** of media when you can. Run the batch as root to match how P5 runs the script. Each machine has its
 own ffmpeg build, so repeat on every machine that may generate previews.
 
 Include in the media: several clips under 10 s, one MXF or TS file (no frame count), one still

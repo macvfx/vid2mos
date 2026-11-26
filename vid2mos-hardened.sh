@@ -27,6 +27,15 @@
 #     host per day, so a monitor can read every machine's runs from one place. The copy is
 #     best effort: it is written in the background and can never delay or fail a run.
 #   * --version and --selftest [source-path] for pre-flight checks (see below).
+#   * --test (or VID2MOS_MODE=test) for test runs that stay out of P5's log (see below).
+#
+# Test mode (--test before the file, or VID2MOS_MODE=test). Same preview, same stdout contract,
+# but nothing reaches the log P5's runs use or the monitor reads:
+#   * log goes to $VID2MOS_LOG, else <output folder>/vid2mos-test-YYYY-MM-DD.log; never the
+#     daily log folder, never the shared folder (VID2MOS_SHARED_DIR is ignored), never syslog
+#   * output folder defaults to /tmp/vid2mos-test-<user> instead of /tmp
+#   * every log line carries mode=test (before pid=), so a reader that expects
+#     "user=U pid=N" never takes it for a P5 run
 #
 # Modes besides a normal run (neither is used by P5; both write to stdout):
 #   --version              print the script version
@@ -37,6 +46,9 @@
 #
 # Environment (all optional):
 #   VID2MOS_BIN_DIR        folder holding ffmpeg + ffprobe (tests / non-standard installs)
+#   VID2MOS_FFMPEG         ffmpeg to use, overriding the folder above (absolute path)
+#   VID2MOS_FFPROBE        ffprobe to use, overriding the folder above (absolute path)
+#   VID2MOS_MODE           "test" = test mode, as --test
 #   AWPST_SRV_HOME         set by P5; ffmpeg/ffprobe are taken from $AWPST_SRV_HOME/bin
 #   VID2MOS_TMP            output folder (default /tmp)
 #   VID2MOS_LOG_DIR        folder for the daily logs (default /var/log if writable, else /tmp)
@@ -46,17 +58,21 @@
 #   VID2MOS_TIMEOUT        ffmpeg limit, seconds
 #   VID2MOS_PROBE_TIMEOUT  ffprobe limit, seconds
 
-VERSION="1.1.0"
+VERSION="1.2.0"
 MODE=""
 VERBOSE=""
-case "$1" in
-    --version)  MODE=version; shift;;
-    --selftest) MODE=selftest; shift;;
-esac
-if [ "$1" = "-v" ]; then
-    VERBOSE=1
-    shift
-fi
+TEST_MODE=""
+[ "$VID2MOS_MODE" = "test" ] && TEST_MODE=1
+# Leading options, in any order. P5 always passes one absolute path, which never starts with "-".
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --version)  MODE=version; shift;;
+        --selftest) MODE=selftest; shift;;
+        --test)     TEST_MODE=1; shift;;
+        -v)         VERBOSE=1; shift;;
+        *)          break;;
+    esac
+done
 input_file="$1"
 
 # ---------------------------------------------------------------- settings
@@ -67,9 +83,14 @@ elif [ -n "$AWPST_SRV_HOME" ]; then
 else
     AW_BIN="/usr/local/aw/bin"
 fi
-FFMPEG="$AW_BIN/ffmpeg"
-FFPROBE="$AW_BIN/ffprobe"
-TMP="${VID2MOS_TMP:-/tmp}"
+FFMPEG="${VID2MOS_FFMPEG:-$AW_BIN/ffmpeg}"
+FFPROBE="${VID2MOS_FFPROBE:-$AW_BIN/ffprobe}"
+if [ -n "$TEST_MODE" ]; then
+    TMP="${VID2MOS_TMP:-/tmp/vid2mos-test-$(id -un)}"
+    [ -d "$TMP" ] || mkdir -p "$TMP" 2>/dev/null
+else
+    TMP="${VID2MOS_TMP:-/tmp}"
+fi
 # Log file. One file per day (vid2mos-YYYY-MM-DD.log): no renaming, so concurrent runs cannot
 # race, and old days stay put until VID2MOS_KEEP_DAYS (default 30) have passed.
 # VID2MOS_LOG pins one fixed file instead (used by the tests).
@@ -77,6 +98,8 @@ LOG_KEEP_DAYS="${VID2MOS_KEEP_DAYS:-30}"
 LOG_DIR=""
 if [ -n "$VID2MOS_LOG" ]; then
     LOG="$VID2MOS_LOG"
+elif [ -n "$TEST_MODE" ]; then
+    LOG="$TMP/vid2mos-test-$(date +%Y-%m-%d).log"   # never the daily log folder
 else
     LOG_DIR="${VID2MOS_LOG_DIR:-}"
     if [ -z "$LOG_DIR" ]; then
@@ -85,6 +108,9 @@ else
     LOG="$LOG_DIR/vid2mos-$(date +%Y-%m-%d).log"
 fi
 SHARED_DIR="${VID2MOS_SHARED_DIR:-}"
+[ -n "$TEST_MODE" ] && SHARED_DIR=""
+MODE_TAG=""
+[ -n "$TEST_MODE" ] && MODE_TAG="mode=test "
 FFMPEG_TIMEOUT="${VID2MOS_TIMEOUT:-120}"
 PROBE_TIMEOUT="${VID2MOS_PROBE_TIMEOUT:-30}"
 
@@ -112,7 +138,7 @@ shared_copy() {
 # Never writes to stdout or stderr (P5 forbids it); -v echoes to stderr for shell tests.
 log() {
     local line
-    line="$(date '+%Y-%m-%d %H:%M:%S %z') host=$HOST user=$(id -un) pid=$$ $*"
+    line="$(date '+%Y-%m-%d %H:%M:%S %z') host=$HOST user=$(id -un) ${MODE_TAG}pid=$$ $*"
     if [ -n "$LOG_DIR" ] && [ ! -e "$LOG" ]; then   # first line of a new day: prune old days
         find "$LOG_DIR" -maxdepth 1 -name 'vid2mos-*.log*' -mtime +"$LOG_KEEP_DAYS" -delete 2>/dev/null
     fi
@@ -121,7 +147,7 @@ log() {
     fi
     printf '%s\n' "$line" >> "$LOG" 2>/dev/null
     shared_copy "$line"
-    logger -t vid2mos "host=$HOST pid=$$ $*" >/dev/null 2>&1
+    [ -n "$TEST_MODE" ] || logger -t vid2mos "host=$HOST pid=$$ $*" >/dev/null 2>&1
     [ -n "$VERBOSE" ] && printf '%s\n' "$line" >&2
     return 0
 }
@@ -147,9 +173,15 @@ if [ "$MODE" = "selftest" ]; then
     echo "host=$HOST"
     echo "user=$(id -un)"
     echo "script=$0"
+    echo "mode=$([ -n "$TEST_MODE" ] && echo test || echo normal)"
     echo "bin_dir=$AW_BIN"
+    echo "ffmpeg_path=$FFMPEG"
+    echo "ffprobe_path=$FFPROBE"
     st_check ffmpeg  test -x "$FFMPEG"
     st_check ffprobe test -x "$FFPROBE"
+    # First line of -version, e.g. "ffmpeg version 7.1 Copyright ...": tells clients apart.
+    [ -x "$FFMPEG" ]  && echo "ffmpeg_version=$("$FFMPEG" -version 2>/dev/null < /dev/null | head -n 1)"
+    [ -x "$FFPROBE" ] && echo "ffprobe_version=$("$FFPROBE" -version 2>/dev/null < /dev/null | head -n 1)"
     st_check tmp_dir test -d "$TMP" -a -w "$TMP"
     if [ -n "$LOG_DIR" ]; then
         echo "log_dir=$LOG_DIR"
@@ -178,7 +210,7 @@ if [ "$MODE" = "selftest" ]; then
     echo "result=FAIL"; exit 1
 fi
 
-log "START input=\"$input_file\" script=$0 bin=$AW_BIN"
+log "START input=\"$input_file\" script=$0 bin=$AW_BIN ffmpeg=\"$FFMPEG\" ffprobe=\"$FFPROBE\""
 
 # ---------------------------------------------------------------- watchdog
 # run_limited <seconds> <command...>   stdin from /dev/null; kills the command on timeout.

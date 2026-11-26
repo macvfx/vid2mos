@@ -52,7 +52,7 @@ JPEG, on success; stderr empty; exit 0 or 1.
 | File | Purpose |
 |---|---|
 | `vid2mos-hardened.sh` | The preview script (drop-in replacement for `vid2mos.sh`) |
-| `test-vid2mos.sh` | 75 checks on synthetic media. `--compare <original>` also shows what the original does on the same inputs |
+| `test-vid2mos.sh` | 96 checks on synthetic media. `--compare <original>` also shows what the original does on the same inputs |
 | `batch-vid2mos.sh` | Runs the script over a folder of real media with a per-file report |
 | `vid2mos-log-summary.sh` | Summarises the daily logs: totals per host, runs per minute, unfinished runs, latest failures |
 | `prepare-client.sh` | One command to get a Mac ready: installs the script to `/Library/Scripts`, checks ffmpeg and Remote Login, runs `--selftest`. `--check` changes nothing |
@@ -66,11 +66,36 @@ JPEG, on success; stderr empty; exit 0 or 1.
 
 It needs `ffmpeg` and `ffprobe`. By default they are taken from `/usr/local/aw/bin` (the P5
 install), or from `$AWPST_SRV_HOME/bin` when P5 sets it. For any other install, point
-`VID2MOS_BIN_DIR` at the folder that holds them.
+`VID2MOS_BIN_DIR` at the folder that holds them, or name each one with `VID2MOS_FFMPEG` and
+`VID2MOS_FFPROBE` (1.2.0), for example to try another ffmpeg with P5's own ffprobe.
 
-Optional environment variables: `VID2MOS_BIN_DIR`, `VID2MOS_TMP` (output folder, default `/tmp`),
-`VID2MOS_LOG_DIR`, `VID2MOS_KEEP_DAYS`, `VID2MOS_LOG` (one fixed file), `VID2MOS_TIMEOUT`,
-`VID2MOS_PROBE_TIMEOUT`, `VID2MOS_SHARED_DIR`.
+Optional environment variables: `VID2MOS_BIN_DIR`, `VID2MOS_FFMPEG`, `VID2MOS_FFPROBE`,
+`VID2MOS_TMP` (output folder, default `/tmp`), `VID2MOS_LOG_DIR`, `VID2MOS_KEEP_DAYS`,
+`VID2MOS_LOG` (one fixed file), `VID2MOS_TIMEOUT`, `VID2MOS_PROBE_TIMEOUT`, `VID2MOS_SHARED_DIR`,
+`VID2MOS_MODE` (`test`, as `--test`).
+
+### Test mode (1.2.0)
+
+Testing on a machine that also makes P5's previews should not add runs to P5's log, which is
+what P5 Preview Monitor and `vid2mos-log-summary.sh` read. `--test` (or `VID2MOS_MODE=test`)
+makes the same preview with the same output, but:
+
+- logs to `VID2MOS_LOG`, else `vid2mos-test-YYYY-MM-DD.log` in the output folder; never the daily
+  log folder, the shared folder or the system log
+- writes previews to `/tmp/vid2mos-test-<user>` unless `VID2MOS_TMP` is set
+- tags every line `mode=test`, which readers skip
+
+```bash
+./vid2mos-hardened.sh --test -v /path/to/video.mov
+VID2MOS_FFMPEG=/usr/local/bin/ffmpeg ./vid2mos-hardened.sh --test -v /path/to/video.mov
+```
+
+`batch-vid2mos.sh` always runs the script in test mode and logs next to its report.
+`--bin-dir`, `--ffmpeg` and `--ffprobe` choose the tools to test:
+
+```bash
+sudo ./batch-vid2mos.sh /Volumes/Share/folder --ffmpeg /usr/local/bin/ffmpeg --report /tmp/local-ffmpeg.tsv
+```
 
 ## Use with Archiware P5
 

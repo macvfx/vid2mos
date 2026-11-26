@@ -250,6 +250,67 @@ check "--selftest fails when ffmpeg is missing"      '[ $strc -eq 1 ] && printf 
 st=$(VID2MOS_SHARED_DIR="$WORK/no-such-share" "$SCRIPT" --selftest 2>&1); strc=$?
 check "--selftest fails on an unwritable shared dir" '[ $strc -eq 1 ] && printf "%s" "$st" | grep -q "^shared_dir_writable=FAIL$"'
 
+st=$("$SCRIPT" --selftest 2>&1)
+check "--selftest names the ffmpeg version"          'printf "%s" "$st" | grep -q "^ffmpeg_version=ffmpeg version "'
+check "--selftest names the exact binaries"          'printf "%s" "$st" | grep -q "^ffmpeg_path=$BIN_DIR/ffmpeg$"'
+
+echo
+echo "Separate ffmpeg and ffprobe (1.2.0)"
+FK="$WORK/fakeffmpeg"; mkdir -p "$FK"
+printf '#!/bin/sh\necho "fake ffmpeg: Invalid argument" >&2\nexit 234\n' > "$FK/ffmpeg"; chmod +x "$FK/ffmpeg"
+: > "$WORK/vid2mos.log"
+VID2MOS_FFMPEG="$FK/ffmpeg" run "$MEDIA/normal.mp4"
+check "VID2MOS_FFMPEG is used instead of the folder"  '[ $RC -eq 1 ] && grep -q "ffmpeg failed (rc=234)" "$WORK/vid2mos.log"'
+check "START line names the ffmpeg and ffprobe used"  'grep " START " "$WORK/vid2mos.log" | grep -q "ffmpeg=\"$FK/ffmpeg\" ffprobe=\"$BIN_DIR/ffprobe\""'
+check "failure leaves ffmpeg stderr in the log file"   'f=$(sed -n "s/.* see \(.*\.log\) input=.*/\1/p" "$WORK/vid2mos.log" | tail -1); [ -n "$f" ] && grep -q "Invalid argument" "$f"'
+VID2MOS_BIN_DIR="$WORK/none" VID2MOS_FFMPEG="$BIN_DIR/ffmpeg" VID2MOS_FFPROBE="$BIN_DIR/ffprobe" run "$MEDIA/normal.mp4"
+check "both overrides work with no bin folder at all" '[ $RC -eq 0 ] && is_jpeg "$OUTTXT" && [ -z "$ERRTXT" ]'
+st=$(VID2MOS_FFPROBE="$WORK/none/ffprobe" "$SCRIPT" --selftest 2>&1); strc=$?
+check "--selftest checks the overridden ffprobe"      '[ $strc -eq 1 ] && printf "%s" "$st" | grep -q "^ffprobe=FAIL$"'
+
+echo
+echo "Test mode (1.2.0)"
+TM="$WORK/tm"; mkdir -p "$TM/daily" "$TM/shared" "$TM/out"
+tlog="$TM/out/vid2mos-test-$(date +%Y-%m-%d).log"
+OUTTXT=$(env -u VID2MOS_LOG VID2MOS_LOG_DIR="$TM/daily" VID2MOS_SHARED_DIR="$TM/shared" VID2MOS_TMP="$TM/out" \
+    "$SCRIPT" --test "$MEDIA/normal.mp4" 2>"$WORK/stderr.txt" < /dev/null); RC=$?; ERRTXT=$(cat "$WORK/stderr.txt")
+sleep 1
+check "--test: same contract (one JPEG path, no stderr)" '[ $RC -eq 0 ] && is_one_line && is_jpeg "$OUTTXT" && [ -z "$ERRTXT" ]'
+check "--test: nothing in the daily log folder"         '[ -z "$(ls -A "$TM/daily")" ]'
+check "--test: nothing in the shared folder"            '[ -z "$(ls -A "$TM/shared")" ]'
+check "--test: log is beside the output, tagged"        'grep -q "user=[^ ]* mode=test pid=[0-9]* START " "$tlog" && grep -q "mode=test pid=[0-9]* OK " "$tlog"'
+check "--test: an untagged reader does not see a run"   '! grep -Eq "user=[^ ]+ pid=[0-9]+ (START|OK|FAIL)" "$tlog"'
+rm -f "$tlog"
+OUTTXT=$(env -u VID2MOS_LOG VID2MOS_MODE=test VID2MOS_LOG_DIR="$TM/daily" VID2MOS_TMP="$TM/out" \
+    "$SCRIPT" "$MEDIA/short3s.mp4" 2>/dev/null < /dev/null); RC=$?
+check "VID2MOS_MODE=test works like --test"             '[ $RC -eq 0 ] && is_jpeg "$OUTTXT" && grep -q "mode=test" "$tlog" && [ -z "$(ls -A "$TM/daily")" ]'
+OUTTXT=$(VID2MOS_LOG="$TM/pinned.log" "$SCRIPT" --test -v "$MEDIA/short3s.mp4" 2>"$WORK/stderr.txt" < /dev/null); RC=$?
+check "--test -v: pinned log honoured, -v echoes"       '[ $RC -eq 0 ] && grep -q "mode=test" "$TM/pinned.log" && grep -q "mode=test" "$WORK/stderr.txt"'
+OUTTXT=$(env -u VID2MOS_TMP -u VID2MOS_LOG "$SCRIPT" --test "$MEDIA/short3s.mp4" 2>/dev/null < /dev/null); RC=$?
+check "--test: default output folder is per user"       '[ $RC -eq 0 ] && case "$OUTTXT" in /tmp/vid2mos-test-$(id -un)/*) true;; *) false;; esac'
+[ -n "$OUTTXT" ] && rm -f "$OUTTXT"
+if [ -x "$SUM" ]; then
+    summary=$("$SUM" "$TM/pinned.log" 2>&1)
+    check "log summary skips test lines"                '! printf "%s" "$summary" | grep -q "^$(hostname -s) "'
+fi
+
+echo
+echo "batch-vid2mos.sh stays out of the daily log"
+BATCH="$HERE/batch-vid2mos.sh"
+if [ -x "$BATCH" ]; then
+    BM="$WORK/batch"; mkdir -p "$BM/media" "$BM/daily"
+    cp "$MEDIA/normal.mp4" "$MEDIA/short3s.mp4" "$BM/media/"
+    out=$(env -u VID2MOS_LOG VID2MOS_LOG_DIR="$BM/daily" VID2MOS_SHARED_DIR="$TM/shared" \
+        "$BATCH" "$BM/media" --script "$SCRIPT" --bin-dir "$BIN_DIR" --report "$BM/r.tsv" 2>&1); brc=$?
+    check "batch passes on good media"                  '[ $brc -eq 0 ] && [ "$(grep -c . "$BM/r.tsv")" -eq 3 ]'
+    check "batch writes its own tagged log"             '[ "$(grep -c "mode=test pid=[0-9]* OK " "$BM/r.log")" -eq 2 ]'
+    check "batch leaves daily and shared folders empty" '[ -z "$(ls -A "$BM/daily")" ] && [ -z "$(ls -A "$TM/shared")" ]'
+    out=$(env -u VID2MOS_LOG "$BATCH" "$BM/media" --script "$SCRIPT" --ffmpeg "$FK/ffmpeg" --report "$BM/f.tsv" 2>&1); brc=$?
+    check "batch --ffmpeg uses that ffmpeg"             '[ $brc -ne 0 ] && grep -q "rc=234" "$BM/f.log"'
+    out=$("$BATCH" "$BM/media" --ffmpeg relative/ffmpeg 2>&1); brc=$?
+    check "batch rejects a relative --ffmpeg"           '[ $brc -eq 2 ]'
+fi
+
 echo
 echo "prepare-client.sh"
 PREP="$HERE/prepare-client.sh"

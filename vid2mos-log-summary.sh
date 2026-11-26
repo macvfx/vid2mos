@@ -45,6 +45,7 @@ function field(name,   i, a) { for (i = 1; i <= NF; i++) if (index($i, name "=")
 {
     ts = substr($0, 1, 19)
     if (since != "" && ts < since) next
+    if (field("mode") == "test") next    # test runs (script --test, batch-vid2mos.sh) are not P5 runs
     host = field("host"); pid = field("pid"); key = host ":" pid
     minute = substr($0, 1, 16)
 
