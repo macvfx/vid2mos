@@ -2,7 +2,23 @@
 
 Earlier versions (1.0.0, 1.1.0) are described in the git history and the README.
 
-## Unreleased (tools; the preview script stays 1.2.1)
+## 1.3.0
+
+### Changes
+- **The ffmpeg limit grows with the file.** It was a flat 120 s, which no large file can meet: the
+  mosaic decodes the whole file, and six 46-63 GB ProRes files that had timed out in a real P5 job
+  each needed 176-303 s when retried. The limit is now 120 s plus 1 s per 100 MB, at most 3600 s
+  (`VID2MOS_TIMEOUT_BASE`, `VID2MOS_TIMEOUT_RATE`, `VID2MOS_TIMEOUT_MAX`). 100 MB/s is about half
+  the slowest rate measured, leaving room for several clients reading the share at once; the hour
+  ceiling keeps a stuck read from holding a P5 preview slot for longer. `VID2MOS_TIMEOUT` still
+  sets one fixed limit, so the test runner's `--timeout` is unchanged.
+- **A timeout is not tried again without the seek.** The second pass exists for short clips and
+  stills; after a timeout it only read the whole file again and doubled the time lost.
+- The timeout reason now says how the limit was set, e.g.
+  `ffmpeg TIMED OUT after 720s and was killed (limit for 62.7 GB, rc=143)`, the `OK` line carries
+  `limit=Ns`, and `--selftest` prints `ffmpeg_timeout=`.
+
+## Tools added after 1.2.1
 
 ### Features
 - **`vid2mos-test-runner.sh`**: runs the preview script over a list of files with one or more
@@ -20,8 +36,8 @@ Earlier versions (1.0.0, 1.1.0) are described in the git history and the README.
 ### Finding
 - The preview decodes the whole file from the seek point, so its time grows with the file's
   length; with files of hundreds of gigabytes the 120 s default cannot be enough. A timeout also
-  costs about twice the limit, because the script retries once without the seek. Not changed in
-  the script yet: measure first with the two tools above.
+  costs about twice the limit, because the script retries once without the seek. Both are
+  changed in 1.3.0.
 
 ## 1.2.1
 

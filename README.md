@@ -30,8 +30,11 @@ silently:
   killed.
 - **Honest results**: no JPEG means exit 1 and nothing on stdout. A timeout is logged as a timeout
   only when the watchdog really fired.
-- **Watchdogs** on ffprobe (30 s) and ffmpeg (120 s), and every tool reads stdin from `/dev/null`,
+- **Watchdogs** on ffprobe (30 s) and ffmpeg, and every tool reads stdin from `/dev/null`,
   so an offline or slow source cannot hang the run or hold P5's pipes open.
+- **A limit that fits the file** (1.3.0): ffmpeg gets 120 s plus 1 s per 100 MB of file, at most
+  1 hour. A 1 GB file gets 130 s, a 60 GB file 12 minutes, files from about 350 GB up the full
+  hour. See "Retrying failed files, and sizing the timeout" below for the numbers behind it.
 - **Short clips and stills** retry without a seek instead of producing nothing.
 - **Frame count fallback**: `nb_frames`, then duration x frame rate, then the first frames.
 - **Optional shared copy of the log**: set `VID2MOS_SHARED_DIR` and every log line is also written to
@@ -56,6 +59,7 @@ JPEG, on success; stderr empty; exit 0 or 1.
 | `batch-vid2mos.sh` | Runs the script over a folder of real media with a per-file report |
 | `vid2mos-test-runner.sh` | Runs the script over a list of files with one or more ffmpeg builds and a chosen time limit, one result row per file per build, previews kept. What P5 Preview Monitor's "Retry failed files" starts on a client |
 | `size-survey.sh` | Sizes every video file under a folder (count, min, median, mean, percentiles, max, size bands, per extension) and estimates the read time against the timeout |
+| [`inspect-movies.sh`](INSPECT-MOVIES-README.md) | Surveys a text list of movie paths, then optionally copies, decodes, previews, and hashes them; `--survey` gives a quick overview and `--skipcopy` inspects originals |
 | `vid2mos-log-summary.sh` | Summarises the daily logs: totals per host, runs per minute, unfinished runs, latest failures |
 | `prepare-client.sh` | One command to get a Mac ready: installs the script to `/Library/Scripts`, checks ffmpeg and Remote Login, runs `--selftest`. `--check` changes nothing |
 | `TESTING.md` | How to test the scripts, what to record, and findings so far |
@@ -73,7 +77,9 @@ install), or from `$AWPST_SRV_HOME/bin` when P5 sets it. For any other install, 
 
 Optional environment variables: `VID2MOS_BIN_DIR`, `VID2MOS_FFMPEG`, `VID2MOS_FFPROBE`,
 `VID2MOS_TMP` (output folder, default `/tmp`), `VID2MOS_LOG_DIR`, `VID2MOS_KEEP_DAYS`, `VID2MOS_LOG_MAX_BYTES` (rotate at, default 20 MB),
-`VID2MOS_LOG` (one fixed file), `VID2MOS_TIMEOUT`, `VID2MOS_PROBE_TIMEOUT`, `VID2MOS_SHARED_DIR`,
+`VID2MOS_LOG` (one fixed file), `VID2MOS_TIMEOUT` (one fixed ffmpeg limit, replacing the scaled
+one), `VID2MOS_TIMEOUT_BASE` / `VID2MOS_TIMEOUT_RATE` / `VID2MOS_TIMEOUT_MAX` (the scaled limit:
+120 s, 100 MB per second, 3600 s), `VID2MOS_PROBE_TIMEOUT`, `VID2MOS_SHARED_DIR`,
 `VID2MOS_MODE` (`test`, as `--test`), `VID2MOS_FOLLOW_SYMLINKS` (`1` = preview what a symbolic
 link points to; by default, since 1.2.1, a link is logged as "source is a symbolic link, not previewed").
 
@@ -104,9 +110,18 @@ sudo ./batch-vid2mos.sh /Volumes/Share/folder --ffmpeg /usr/local/bin/ffmpeg --r
 
 The mosaic is made with ffmpeg's `select` + `tile` filters, which decode every frame from the seek
 point to the end of the file. A preview therefore costs at least one full read of the file, and a
-file whose read alone takes longer than `VID2MOS_TIMEOUT` (120 s by default) can never get one.
-After a timeout the script also tries once more without the seek, so a timed-out file costs about
-twice the limit. To see how many of a share's files are at risk:
+file whose read alone takes longer than the limit can never get one. Up to 1.2.1 the limit was a
+flat 120 s, and a timeout was tried once more without the seek, costing twice the limit.
+
+Measured on a P5 server over 10GbE, one file at a time, with Archiware's ffmpeg: six 1080p ProRes
+files of 46-63 GB (50-67 minutes each) that had all timed out at 120 s made their previews in
+176-303 s, 175-333 MB/s. So 1.3.0 scales the limit with the file: 120 s plus 1 s per 100 MB
+(half the slowest rate measured, for a real job where several clients read the share at once),
+capped at 1 hour so a stuck read still ends, and a timeout is no longer tried again. P5 passes
+the script no environment, so to change these numbers for P5 runs edit the defaults near
+`TIMEOUT_BASE` at the top of the script. `--selftest` prints the limit in use.
+
+To see how many of a share's files are at risk:
 
 ```bash
 ./size-survey.sh /Volumes/Share/project --rate 400 --timeout 120 --report /tmp/sizes.tsv

@@ -14,9 +14,13 @@
 #     so a failed preview can be traced to the machine that ran it.
 #   * ffmpeg runs with -nostdin and every tool gets stdin from /dev/null,
 #     so nothing can sit waiting on an inherited pipe.
-#   * ffprobe and ffmpeg each run under a watchdog (VID2MOS_TIMEOUT, default 120 s for
-#     ffmpeg, VID2MOS_PROBE_TIMEOUT, default 30 s for ffprobe), so an offline or very
-#     slow source cannot hang the run. The watchdog never keeps stdout open.
+#   * ffprobe and ffmpeg each run under a watchdog, so an offline or very slow source cannot
+#     hang the run. The watchdog never keeps stdout open. ffprobe gets VID2MOS_PROBE_TIMEOUT
+#     (default 30 s). ffmpeg's limit grows with the file (1.3.0): 120 s plus 1 s per 100 MB,
+#     at most 1 hour, because the mosaic decodes the whole file and a 60 GB ProRes clip
+#     needs 3-5 minutes. VID2MOS_TIMEOUT sets one fixed limit instead, as before 1.3.0.
+#   * A run that timed out is not tried a second time without the seek (1.3.0): that only
+#     doubled the time spent on a file too big for the limit.
 #   * Frame count "N/A", empty or 0 no longer breaks the arithmetic: the script falls
 #     back to duration x frame rate, then to the first frames of the file.
 #   * Clips shorter than the 10 s seek point (and still images) are retried without a seek.
@@ -59,10 +63,13 @@
 #   VID2MOS_LOG_MAX_BYTES  size at which a log file moves to .1, .2, ... (default 20 MB)
 #   VID2MOS_LOG            pin ONE fixed log file instead of daily files (tests)
 #   VID2MOS_SHARED_DIR     also copy every log line to $VID2MOS_SHARED_DIR/vid2mos-<host>-YYYY-MM-DD.log
-#   VID2MOS_TIMEOUT        ffmpeg limit, seconds
+#   VID2MOS_TIMEOUT        one fixed ffmpeg limit in seconds, whatever the file size
+#   VID2MOS_TIMEOUT_BASE   scaled limit: seconds for any file (default 120)
+#   VID2MOS_TIMEOUT_RATE   scaled limit: MB of file per extra second (default 100)
+#   VID2MOS_TIMEOUT_MAX    scaled limit: ceiling in seconds (default 3600)
 #   VID2MOS_PROBE_TIMEOUT  ffprobe limit, seconds
 
-VERSION="1.2.1"
+VERSION="1.3.0"
 MODE=""
 VERBOSE=""
 TEST_MODE=""
@@ -116,7 +123,15 @@ SHARED_DIR="${VID2MOS_SHARED_DIR:-}"
 [ -n "$TEST_MODE" ] && SHARED_DIR=""
 MODE_TAG=""
 [ -n "$TEST_MODE" ] && MODE_TAG="mode=test "
-FFMPEG_TIMEOUT="${VID2MOS_TIMEOUT:-120}"
+# ffmpeg limit: fixed when VID2MOS_TIMEOUT is set, else scaled to the file size once it is known.
+TIMEOUT_BASE="${VID2MOS_TIMEOUT_BASE:-120}"
+TIMEOUT_RATE="${VID2MOS_TIMEOUT_RATE:-100}"
+TIMEOUT_MAX="${VID2MOS_TIMEOUT_MAX:-3600}"
+case "$TIMEOUT_BASE" in ''|*[!0-9]*) TIMEOUT_BASE=120;; esac
+case "$TIMEOUT_RATE" in ''|*[!0-9]*|0) TIMEOUT_RATE=100;; esac
+case "$TIMEOUT_MAX"  in ''|*[!0-9]*|0) TIMEOUT_MAX=3600;; esac
+FFMPEG_TIMEOUT="$VID2MOS_TIMEOUT"
+case "$FFMPEG_TIMEOUT" in *[!0-9]*) FFMPEG_TIMEOUT=120;; esac   # unset stays empty: scaled
 PROBE_TIMEOUT="${VID2MOS_PROBE_TIMEOUT:-30}"
 
 position=10                    # seek point, seconds
@@ -185,6 +200,8 @@ if [ "$MODE" = "selftest" ]; then
     echo "script=$0"
     echo "mode=$([ -n "$TEST_MODE" ] && echo test || echo normal)"
     echo "bin_dir=$AW_BIN"
+    if [ -n "$FFMPEG_TIMEOUT" ]; then echo "ffmpeg_timeout=fixed ${FFMPEG_TIMEOUT}s"
+    else echo "ffmpeg_timeout=scaled ${TIMEOUT_BASE}s + 1s per ${TIMEOUT_RATE} MB, max ${TIMEOUT_MAX}s"; fi
     echo "ffmpeg_path=$FFMPEG"
     echo "ffprobe_path=$FFPROBE"
     st_check ffmpeg  test -x "$FFMPEG"
@@ -256,6 +273,22 @@ fi
 [ -x "$FFPROBE" ]        || fail "ffprobe not executable at $FFPROBE"
 [ -d "$TMP" ] && [ -w "$TMP" ] || fail "output folder $TMP not writable"
 
+# ------------------------------------------------------- ffmpeg time limit
+file_size() {   # bytes, or empty. GNU stat takes -c, BSD (macOS) stat takes -f.
+    if stat -c %s /dev/null > /dev/null 2>&1; then stat -L -c %s -- "$1"; else stat -L -f %z -- "$1"; fi 2> /dev/null
+}
+size_bytes=$(file_size "$input_file")
+case "$size_bytes" in ''|*[!0-9]*) size_bytes=0;; esac
+size_text=$(awk -v b="$size_bytes" 'BEGIN { printf "%.1f GB", b / 1e9 }')
+if [ -n "$FFMPEG_TIMEOUT" ]; then
+    limit_text="fixed limit"
+else
+    FFMPEG_TIMEOUT=$(( TIMEOUT_BASE + size_bytes / (TIMEOUT_RATE * 1000000) ))
+    [ "$FFMPEG_TIMEOUT" -le "$TIMEOUT_MAX" ] || FFMPEG_TIMEOUT=$TIMEOUT_MAX
+    [ "$FFMPEG_TIMEOUT" -ge 1 ] || FFMPEG_TIMEOUT=1
+    limit_text="limit for $size_text"
+fi
+
 # ------------------------------------------------------ probe: frame count
 probe_file="$TMP/.vid2mos-probe.$$"
 TIMEOUT_MARK="$TMP/.vid2mos-timeout.$$"   # created by the watchdog only when it fires
@@ -312,16 +345,17 @@ make_mosaic() {   # make_mosaic [seek-seconds]   (no argument = no -ss at all)
 }
 
 make_mosaic "$position"; rc=$?
-if [ ! -s "$output_file" ]; then
+if [ ! -s "$output_file" ] && [ ! -e "$TIMEOUT_MARK" ]; then
     # Short clip (shorter than the seek point), a still image, or the seek found nothing:
     # retry with no seek at all (note: "-ss 0" makes ffmpeg 7.x emit nothing for a JPEG).
+    # Not after a timeout: a second pass over the whole file would only take longer.
     log "retry without seek rc=$rc input=\"$input_file\""
     make_mosaic; rc=$?
 fi
 
 if [ $rc -ne 0 ] && [ ! -s "$output_file" ]; then
     if [ -e "$TIMEOUT_MARK" ]; then
-        fail "ffmpeg TIMED OUT after ${FFMPEG_TIMEOUT}s and was killed (rc=$rc) see $ffmpeg_log"
+        fail "ffmpeg TIMED OUT after ${FFMPEG_TIMEOUT}s and was killed ($limit_text, rc=$rc) see $ffmpeg_log"
     fi
     fail "ffmpeg failed (rc=$rc) see $ffmpeg_log"
 fi
@@ -329,6 +363,6 @@ fi
 
 # Success: the log of a clean run is not needed.
 rm -f "$ffmpeg_log"
-log "OK ($(( SECONDS - START ))s) frames=$total_frames via=$method interval=$interval input=\"$input_file\" output=\"$output_file\""
+log "OK ($(( SECONDS - START ))s) frames=$total_frames via=$method interval=$interval limit=${FFMPEG_TIMEOUT}s input=\"$input_file\" output=\"$output_file\""
 printf '%s\n' "$output_file"
 exit 0

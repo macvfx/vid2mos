@@ -160,6 +160,27 @@ check "ends within 25 s (probe limit 3 s per call)" '[ $SECS -le 25 ]'
 check "stderr empty"                                '[ ! -s "$WORK/stderr.txt" ]'
 check "no leftover fake ffprobe process"            '! pgrep -f "$FAKE/ffprobe" >/dev/null'
 
+echo "13b. ffmpeg limit scales with the file size (1.3.0)"
+printf '#!/bin/sh\nsleep 60\n' > "$FAKE/ffmpeg"; chmod +x "$FAKE/ffmpeg"
+cp "$BIN_DIR/ffprobe" "$FAKE/ffprobe"
+SPARSE="$MEDIA/sparse-300mb.mov"
+dd if=/dev/zero of="$SPARSE" bs=1 count=0 seek=300000000 2>/dev/null   # 300 MB, no disk used
+start=$SECONDS
+VID2MOS_BIN_DIR="$FAKE" VID2MOS_TIMEOUT_BASE=1 VID2MOS_TIMEOUT_RATE=100 "$SCRIPT" "$SPARSE" >/dev/null 2>&1
+SECS=$((SECONDS-start))
+check "300 MB at 100 MB/s on a 1 s base gets a 4 s limit" 'grep "sparse-300mb" "$WORK/vid2mos.log" | grep -q "TIMED OUT after 4s and was killed (limit for 0.3 GB"'
+check "a timeout is not tried again without the seek"    '! grep "sparse-300mb" "$WORK/vid2mos.log" | grep -q "retry without seek"'
+check "so it returns within one limit (< 12 s)"           '[ $SECS -lt 12 ]'
+VID2MOS_BIN_DIR="$FAKE" VID2MOS_TIMEOUT_BASE=1 VID2MOS_TIMEOUT_RATE=1 VID2MOS_TIMEOUT_MAX=2 "$SCRIPT" "$SPARSE" >/dev/null 2>&1
+check "the ceiling caps the scaled limit"                 'grep "sparse-300mb" "$WORK/vid2mos.log" | grep -q "TIMED OUT after 2s"'
+VID2MOS_BIN_DIR="$FAKE" VID2MOS_TIMEOUT=2 VID2MOS_TIMEOUT_BASE=50 "$SCRIPT" "$SPARSE" >/dev/null 2>&1
+check "VID2MOS_TIMEOUT still sets one fixed limit"        'grep "sparse-300mb" "$WORK/vid2mos.log" | grep -q "TIMED OUT after 2s and was killed (fixed limit"'
+rm -f "$SPARSE"
+"$SCRIPT" "$MEDIA/normal.mp4" >/dev/null 2>&1
+check "a small file keeps the 120 s base, logged on OK"   'grep "normal.mp4" "$WORK/vid2mos.log" | grep " OK " | tail -n 1 | grep -q "limit=120s input="'
+st=$("$SCRIPT" --selftest 2>/dev/null)
+check "selftest reports the scaled limit"                 'printf "%s" "$st" | grep -q "^ffmpeg_timeout=scaled 120s + 1s per 100 MB, max 3600s$"'
+
 echo "14. Logging"
 check "log file written"                    '[ -s "$WORK/vid2mos.log" ]'
 check "log records the host name"           'grep -q "host=$(hostname -s)" "$WORK/vid2mos.log"'

@@ -15,7 +15,8 @@
 #   --toolchain  a labelled ffmpeg + ffprobe pair, absolute paths, repeatable. Default:
 #                Archiware=/usr/local/aw/bin/ffmpeg:/usr/local/aw/bin/ffprobe (what P5 uses)
 #   --script     preview script (default /Library/Scripts/vid2mos-hardened.sh; needs 1.2.0+)
-#   --timeout    ffmpeg limit per file in seconds, or none (default: the script's, 120 s)
+#   --timeout    ffmpeg limit per file in seconds, or none (default: the script's own: 120 s up to 1.2.1,
+#                scaled to the file size from 1.3.0)
 #   --keep-jpegs keep each preview: in DIR/jpeg, or in --jpeg-dir (a review folder, e.g. on
 #                shared storage), named <n>-<toolchain>-<file name>.jpg
 #   --no-probe   skip the one ffprobe read per file (codec, size, duration)
