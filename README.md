@@ -52,7 +52,7 @@ JPEG, on success; stderr empty; exit 0 or 1.
 | File | Purpose |
 |---|---|
 | `vid2mos-hardened.sh` | The preview script (drop-in replacement for `vid2mos.sh`) |
-| `test-vid2mos.sh` | 102 checks on synthetic media. `--compare <original>` also shows what the original does on the same inputs |
+| `test-vid2mos.sh` | 106 checks on synthetic media. `--compare <original>` also shows what the original does on the same inputs |
 | `batch-vid2mos.sh` | Runs the script over a folder of real media with a per-file report |
 | `vid2mos-log-summary.sh` | Summarises the daily logs: totals per host, runs per minute, unfinished runs, latest failures |
 | `prepare-client.sh` | One command to get a Mac ready: installs the script to `/Library/Scripts`, checks ffmpeg and Remote Login, runs `--selftest`. `--check` changes nothing |
@@ -72,7 +72,8 @@ install), or from `$AWPST_SRV_HOME/bin` when P5 sets it. For any other install, 
 Optional environment variables: `VID2MOS_BIN_DIR`, `VID2MOS_FFMPEG`, `VID2MOS_FFPROBE`,
 `VID2MOS_TMP` (output folder, default `/tmp`), `VID2MOS_LOG_DIR`, `VID2MOS_KEEP_DAYS`, `VID2MOS_LOG_MAX_BYTES` (rotate at, default 20 MB),
 `VID2MOS_LOG` (one fixed file), `VID2MOS_TIMEOUT`, `VID2MOS_PROBE_TIMEOUT`, `VID2MOS_SHARED_DIR`,
-`VID2MOS_MODE` (`test`, as `--test`).
+`VID2MOS_MODE` (`test`, as `--test`), `VID2MOS_FOLLOW_SYMLINKS` (`1` = preview what a symbolic
+link points to; by default, since 1.2.1, a link is logged as "source is a symbolic link, not previewed").
 
 ### Test mode (1.2.0)
 

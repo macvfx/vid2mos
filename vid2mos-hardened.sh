@@ -23,6 +23,7 @@
 #   * The output file name includes a short hash of the input path, so two files with
 #     the same name in different folders cannot overwrite each other's preview.
 #   * The result is checked: a missing or empty JPG is a failure, not a printed path.
+#   * A symbolic link is not previewed (1.2.1): it fails at once with its own reason.
 #   * Optional second copy of the log in a shared folder (VID2MOS_SHARED_DIR), one file per
 #     host per day, so a monitor can read every machine's runs from one place. The copy is
 #     best effort: it is written in the background and can never delay or fail a run.
@@ -49,6 +50,8 @@
 #   VID2MOS_FFMPEG         ffmpeg to use, overriding the folder above (absolute path)
 #   VID2MOS_FFPROBE        ffprobe to use, overriding the folder above (absolute path)
 #   VID2MOS_MODE           "test" = test mode, as --test
+#   VID2MOS_FOLLOW_SYMLINKS  1 = preview what a symbolic link points to (default: a link is
+#                          logged as FAIL "source is a symbolic link, not previewed", exit 1)
 #   AWPST_SRV_HOME         set by P5; ffmpeg/ffprobe are taken from $AWPST_SRV_HOME/bin
 #   VID2MOS_TMP            output folder (default /tmp)
 #   VID2MOS_LOG_DIR        folder for the daily logs (default /var/log if writable, else /tmp)
@@ -242,6 +245,12 @@ is_posint() { case "$1" in ''|*[!0-9]*) return 1;; *) [ "$1" -ge 1 ];; esac; }
 
 # ------------------------------------------------------------------- checks
 [ -n "$input_file" ]     || fail "no input file given"
+# A symbolic link is archived by P5 as a link, not as the media it points to, so a preview of the
+# target would not belong to the entry; links inside Final Cut Pro libraries (Original Media) are
+# the common case and make ffmpeg fail. Checked before -f so a broken link reads the same way.
+if [ -L "$input_file" ] && [ "${VID2MOS_FOLLOW_SYMLINKS:-}" != 1 ]; then
+    fail "source is a symbolic link, not previewed"
+fi
 [ -f "$input_file" ]     || fail "input file not found or not readable"
 [ -x "$FFMPEG" ]         || fail "ffmpeg not executable at $FFMPEG"
 [ -x "$FFPROBE" ]        || fail "ffprobe not executable at $FFPROBE"

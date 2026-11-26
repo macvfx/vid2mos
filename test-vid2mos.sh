@@ -255,6 +255,20 @@ check "--selftest names the ffmpeg version"          'printf "%s" "$st" | grep -
 check "--selftest names the exact binaries"          'printf "%s" "$st" | grep -q "^ffmpeg_path=$BIN_DIR/ffmpeg$"'
 
 echo
+echo "Symbolic links are not previewed (1.2.1)"
+ln -s "$MEDIA/normal.mp4" "$MEDIA/link.mp4"
+ln -s "$MEDIA/gone.mp4" "$MEDIA/broken-link.mp4"
+: > "$WORK/vid2mos.log"
+run "$MEDIA/link.mp4"
+check "a link fails at once, stdout and stderr empty"   '[ $RC -eq 1 ] && [ -z "$OUTTXT" ] && [ -z "$ERRTXT" ] && [ $SECS -le 2 ]'
+check "the reason names the symbolic link"               'grep "link.mp4" "$WORK/vid2mos.log" | grep -q "FAIL .*source is a symbolic link, not previewed"'
+run "$MEDIA/broken-link.mp4"
+check "a broken link gets the same reason"               '[ $RC -eq 1 ] && grep "broken-link.mp4" "$WORK/vid2mos.log" | grep -q "symbolic link"'
+VID2MOS_FOLLOW_SYMLINKS=1 run "$MEDIA/link.mp4"
+check "VID2MOS_FOLLOW_SYMLINKS=1 previews the target"    '[ $RC -eq 0 ] && is_jpeg "$OUTTXT"'
+rm -f "$MEDIA/link.mp4" "$MEDIA/broken-link.mp4"
+
+echo
 echo "Size rotation keeps every rotation (1.2.0)"
 RL="$WORK/rot.log"
 for _ in 1 2 3; do VID2MOS_LOG="$RL" VID2MOS_LOG_MAX_BYTES=100 "$SCRIPT" "$MEDIA/short3s.mp4" >/dev/null 2>&1; done

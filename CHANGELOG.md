@@ -4,6 +4,16 @@ Earlier versions (1.0.0, 1.1.0) are described in the git history and the README.
 
 ## 1.2.1
 
+### Changes
+- **Symbolic links are not previewed.** A source that is a symbolic link fails at once, without
+  running ffprobe or ffmpeg, with the reason `source is a symbolic link, not previewed`. P5 archives
+  a link as a link, so a preview of what it points to would not belong to the entry; and the links
+  inside Final Cut Pro libraries (`Original Media`) were among the files failing with
+  `ffmpeg failed (rc=234)` on a real job. P5 still gets "no preview" (exit 1), but the log now says
+  why, and P5 Preview Monitor 0.3.0 build 15 keeps these out of redo lists. Real files inside a
+  library are not links and are previewed as before. `VID2MOS_FOLLOW_SYMLINKS=1` restores the old
+  behaviour for manual tests (P5 itself cannot pass it).
+
 ### Fixes
 - **A busy day's log lost lines.** At 5 MB the log moved to `.1` with `mv -f`, so a second
   rotation the same day overwrote the first, with every START and FAIL line in it (and with them
