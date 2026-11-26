@@ -2,6 +2,27 @@
 
 Earlier versions (1.0.0, 1.1.0) are described in the git history and the README.
 
+## Unreleased (tools; the preview script stays 1.2.1)
+
+### Features
+- **`vid2mos-test-runner.sh`**: runs the preview script over a list of files with one or more
+  labelled ffmpeg + ffprobe builds (`--mode script|fallback|matrix`), a chosen limit
+  (`--timeout S|none`), previews kept in the run folder or a review folder. Writes
+  `results.tsv` (one row per file per build, with size, codec, dimensions, duration and the
+  failure reason), `state`, the run's own test-mode log and each failure's ffmpeg log. Stops after
+  the current file with `DIR/stop`, or at once on TERM, killing the ffmpeg it started. Started
+  detached by P5 Preview Monitor 0.3.0 build 18 ("Retry failed files"). Results are TSV, not the
+  JSON Lines the client-tests plan named: simpler to write safely from a shell.
+- **`size-survey.sh`**: sizes every video file under a folder and summarises them, with the read
+  time each needs at a given speed and how many exceed the timeout. Symbolic links are counted
+  apart.
+
+### Finding
+- The preview decodes the whole file from the seek point, so its time grows with the file's
+  length; with files of hundreds of gigabytes the 120 s default cannot be enough. A timeout also
+  costs about twice the limit, because the script retries once without the seek. Not changed in
+  the script yet: measure first with the two tools above.
+
 ## 1.2.1
 
 ### Changes

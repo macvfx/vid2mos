@@ -333,6 +333,45 @@ if [ -x "$BATCH" ]; then
 fi
 
 echo
+echo "vid2mos-test-runner.sh (retry failed files)"
+RUNNER="$HERE/vid2mos-test-runner.sh"
+if [ -x "$RUNNER" ]; then
+    RD="$WORK/runner"; mkdir -p "$RD/media"
+    cp "$MEDIA/normal.mp4" "$RD/media/it's here.mp4"
+    ln -s "$RD/media/it's here.mp4" "$RD/media/link.mp4"
+    printf '#!/bin/sh\nsleep 30\n' > "$RD/slow"; chmod +x "$RD/slow"
+    printf '%s\n' "$RD/media/it's here.mp4" "$RD/media/link.mp4" "$RD/media/gone.mp4" > "$RD/list"
+    "$RUNNER" --run-dir "$RD/a" --list "$RD/list" --mode fallback --script "$SCRIPT" \
+        --toolchain "Fake=$FK/ffmpeg:$BIN_DIR/ffprobe" --toolchain "Real=$BIN_DIR/ffmpeg:$BIN_DIR/ffprobe" --keep-jpegs > /dev/null 2>&1; rrc=$?
+    check "runner finishes and says done"                '[ $rrc -eq 0 ] && grep -q "^done 3 3" "$RD/a/state"'
+    check "a failing ffmpeg falls back to the next"      'awk -F"\t" "\$2==\"Fake\" && \$3==\"fail\"" "$RD/a/results.tsv" | grep -q "rc=234" && awk -F"\t" "\$2==\"Real\" && \$3==\"ok\"" "$RD/a/results.tsv" | grep -q .'
+    check "the failure keeps its ffmpeg log"             '[ -s "$RD/a/ffmpeg/1-Fake.log" ]'
+    check "the preview is kept and is a JPEG"            'j=$(awk -F"\t" "\$3==\"ok\" {print \$7}" "$RD/a/results.tsv"); [ "$(head -c 2 "$j" | xxd -p)" = "ffd8" ]'
+    check "links and missing files are reported, not run" 'awk -F"\t" "{print \$3}" "$RD/a/results.tsv" | grep -q symlink && awk -F"\t" "{print \$3}" "$RD/a/results.tsv" | grep -q missing'
+    check "the run logs in test mode, to its own log"    'grep -q "mode=test pid=[0-9]* OK " "$RD/a/run.log"'
+    "$RUNNER" --run-dir "$RD/b" --list "$RD/list" --script "$SCRIPT" --toolchain "Slow=$RD/slow:$BIN_DIR/ffprobe" --timeout 2 > /dev/null 2>&1
+    check "--timeout reaches the script"                 'grep -q "TIMED OUT after 2s" "$RD/b/results.tsv"'
+    "$RUNNER" --run-dir "$RD/c" --list "$RD/list" --script "$SCRIPT" --toolchain "Slow=$RD/slow:$BIN_DIR/ffprobe" --timeout 60 > /dev/null 2>&1 & rp=$!
+    sleep 3; kill -TERM $rp; wait $rp 2>/dev/null; sleep 1
+    check "stopping marks the run and kills its ffmpeg"  'grep -q "^stopped" "$RD/c/state" && ! pgrep -f "$RD/slow" > /dev/null'
+    "$RUNNER" --run-dir "$RD/d" --list "$RD/list" --script "$SCRIPT" --toolchain "Bad=relative/ffmpeg:/x" > /dev/null 2>&1; rrc=$?
+    check "a relative toolchain path is refused"         '[ $rrc -eq 2 ] && grep -q "^error" "$RD/d/state"'
+fi
+
+echo
+echo "size-survey.sh"
+SURVEY="$HERE/size-survey.sh"
+if [ -x "$SURVEY" ]; then
+    SV="$WORK/survey"; mkdir -p "$SV/m/Lib.fcpbundle/E"
+    cp "$MEDIA/normal.mp4" "$SV/m/a.mp4"; mkfile -n 3m "$SV/m/Lib.fcpbundle/E/big.MOV"; ln -s "$SV/m/a.mp4" "$SV/m/l.mov"
+    out=$("$SURVEY" "$SV/m" --report "$SV/r.tsv" --rate 1 --timeout 2 2>&1); src=$?
+    check "survey counts files, not links"               '[ $src -eq 0 ] && printf "%s" "$out" | grep -q "^Video files     : 2" && printf "%s" "$out" | grep -q "^Symbolic links  : 1"'
+    check "survey flags files inside a library"          'printf "%s" "$out" | grep -q "^Inside .fcpbundle: 1"'
+    check "survey counts files too big for the timeout"  'printf "%s" "$out" | grep -q "1 file(s) take longer than the 2s timeout"'
+    check "survey report has one row per file"           '[ "$(grep -c . "$SV/r.tsv")" -eq 3 ]'
+fi
+
+echo
 echo "prepare-client.sh"
 PREP="$HERE/prepare-client.sh"
 if [ -x "$PREP" ]; then

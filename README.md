@@ -52,8 +52,10 @@ JPEG, on success; stderr empty; exit 0 or 1.
 | File | Purpose |
 |---|---|
 | `vid2mos-hardened.sh` | The preview script (drop-in replacement for `vid2mos.sh`) |
-| `test-vid2mos.sh` | 106 checks on synthetic media. `--compare <original>` also shows what the original does on the same inputs |
+| `test-vid2mos.sh` | 119 checks on synthetic media. `--compare <original>` also shows what the original does on the same inputs |
 | `batch-vid2mos.sh` | Runs the script over a folder of real media with a per-file report |
+| `vid2mos-test-runner.sh` | Runs the script over a list of files with one or more ffmpeg builds and a chosen time limit, one result row per file per build, previews kept. What P5 Preview Monitor's "Retry failed files" starts on a client |
+| `size-survey.sh` | Sizes every video file under a folder (count, min, median, mean, percentiles, max, size bands, per extension) and estimates the read time against the timeout |
 | `vid2mos-log-summary.sh` | Summarises the daily logs: totals per host, runs per minute, unfinished runs, latest failures |
 | `prepare-client.sh` | One command to get a Mac ready: installs the script to `/Library/Scripts`, checks ffmpeg and Remote Login, runs `--selftest`. `--check` changes nothing |
 | `TESTING.md` | How to test the scripts, what to record, and findings so far |
@@ -97,6 +99,33 @@ VID2MOS_FFMPEG=/usr/local/bin/ffmpeg ./vid2mos-hardened.sh --test -v /path/to/vi
 ```bash
 sudo ./batch-vid2mos.sh /Volumes/Share/folder --ffmpeg /usr/local/bin/ffmpeg --report /tmp/local-ffmpeg.tsv
 ```
+
+### Retrying failed files, and sizing the timeout
+
+The mosaic is made with ffmpeg's `select` + `tile` filters, which decode every frame from the seek
+point to the end of the file. A preview therefore costs at least one full read of the file, and a
+file whose read alone takes longer than `VID2MOS_TIMEOUT` (120 s by default) can never get one.
+After a timeout the script also tries once more without the seek, so a timed-out file costs about
+twice the limit. To see how many of a share's files are at risk:
+
+```bash
+./size-survey.sh /Volumes/Share/project --rate 400 --timeout 120 --report /tmp/sizes.tsv
+```
+
+`--rate` is the read speed to assume in MB/s (400 is a busy 10GbE share). `--probe` adds duration
+and codec per file (slower). To retry a list of files with a longer limit and a second ffmpeg,
+keeping the previews:
+
+```bash
+./vid2mos-test-runner.sh --run-dir /tmp/retry-1 --list /tmp/failed.txt --mode fallback \
+    --toolchain Archiware=/usr/local/aw/bin/ffmpeg:/usr/local/aw/bin/ffprobe \
+    --toolchain Local=/usr/local/bin/ffmpeg:/usr/local/bin/ffprobe \
+    --timeout 1800 --jpeg-dir /Volumes/Share/preview-review
+```
+
+Results are in `/tmp/retry-1/results.tsv`, the script's log for the run in `run.log`, and
+ffmpeg's error output for each failure in `ffmpeg/`. Both tools run in test mode: the daily log
+and P5 are never touched.
 
 ## Use with Archiware P5
 
