@@ -255,6 +255,13 @@ check "--selftest names the ffmpeg version"          'printf "%s" "$st" | grep -
 check "--selftest names the exact binaries"          'printf "%s" "$st" | grep -q "^ffmpeg_path=$BIN_DIR/ffmpeg$"'
 
 echo
+echo "Size rotation keeps every rotation (1.2.0)"
+RL="$WORK/rot.log"
+for _ in 1 2 3; do VID2MOS_LOG="$RL" VID2MOS_LOG_MAX_BYTES=100 "$SCRIPT" "$MEDIA/short3s.mp4" >/dev/null 2>&1; done
+check "rotations are numbered .1, .2 and none is overwritten" '[ -s "$RL.1" ] && [ -s "$RL.2" ] && [ -s "$RL" ]'
+check "every run's OK line survives the rotations"            '[ "$(cat "$RL" "$RL".* | grep -c " OK ")" -eq 3 ]'
+
+echo
 echo "Separate ffmpeg and ffprobe (1.2.0)"
 FK="$WORK/fakeffmpeg"; mkdir -p "$FK"
 printf '#!/bin/sh\necho "fake ffmpeg: Invalid argument" >&2\nexit 234\n' > "$FK/ffmpeg"; chmod +x "$FK/ffmpeg"

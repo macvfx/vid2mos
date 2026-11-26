@@ -2,6 +2,15 @@
 
 Earlier versions (1.0.0, 1.1.0) are described in the git history and the README.
 
+## 1.2.1
+
+### Fixes
+- **A busy day's log lost lines.** At 5 MB the log moved to `.1` with `mv -f`, so a second
+  rotation the same day overwrote the first, with every START and FAIL line in it (and with them
+  the full paths of failed previews). A multi-terabyte job can pass 5 MB in a day. Rotation now
+  happens at 20 MB (`VID2MOS_LOG_MAX_BYTES`) to the next free `.1`, `.2`, ... and never replaces
+  one. P5 Preview Monitor 0.3.0 build 13 reads these rotations.
+
 ## 1.2.0
 
 ### Features

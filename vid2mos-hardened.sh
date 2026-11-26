@@ -53,12 +53,13 @@
 #   VID2MOS_TMP            output folder (default /tmp)
 #   VID2MOS_LOG_DIR        folder for the daily logs (default /var/log if writable, else /tmp)
 #   VID2MOS_KEEP_DAYS      days of daily logs to keep (default 30)
+#   VID2MOS_LOG_MAX_BYTES  size at which a log file moves to .1, .2, ... (default 20 MB)
 #   VID2MOS_LOG            pin ONE fixed log file instead of daily files (tests)
 #   VID2MOS_SHARED_DIR     also copy every log line to $VID2MOS_SHARED_DIR/vid2mos-<host>-YYYY-MM-DD.log
 #   VID2MOS_TIMEOUT        ffmpeg limit, seconds
 #   VID2MOS_PROBE_TIMEOUT  ffprobe limit, seconds
 
-VERSION="1.2.0"
+VERSION="1.2.1"
 MODE=""
 VERBOSE=""
 TEST_MODE=""
@@ -95,6 +96,7 @@ fi
 # race, and old days stay put until VID2MOS_KEEP_DAYS (default 30) have passed.
 # VID2MOS_LOG pins one fixed file instead (used by the tests).
 LOG_KEEP_DAYS="${VID2MOS_KEEP_DAYS:-30}"
+LOG_MAX_BYTES="${VID2MOS_LOG_MAX_BYTES:-20971520}"   # 20 MB per file before it rotates
 LOG_DIR=""
 if [ -n "$VID2MOS_LOG" ]; then
     LOG="$VID2MOS_LOG"
@@ -142,8 +144,13 @@ log() {
     if [ -n "$LOG_DIR" ] && [ ! -e "$LOG" ]; then   # first line of a new day: prune old days
         find "$LOG_DIR" -maxdepth 1 -name 'vid2mos-*.log*' -mtime +"$LOG_KEEP_DAYS" -delete 2>/dev/null
     fi
-    if [ -f "$LOG" ] && [ "$(stat -f %z "$LOG" 2>/dev/null || echo 0)" -gt 5242880 ]; then
-        mv -f "$LOG" "$LOG.1" 2>/dev/null
+    # Size rotation: the full file moves to the next free .1, .2, ... and is never overwritten
+    # (up to 1.1.0 it went to .1 with -f at 5 MB, so a second rotation on a busy day lost the
+    # first one's lines). mv -n never replaces; two runs racing here just leave one rotation.
+    if [ -f "$LOG" ] && [ "$(stat -f %z "$LOG" 2>/dev/null || echo 0)" -gt "$LOG_MAX_BYTES" ]; then
+        local n=1
+        while [ -e "$LOG.$n" ]; do n=$(( n + 1 )); done
+        mv -n "$LOG" "$LOG.$n" 2>/dev/null
     fi
     printf '%s\n' "$line" >> "$LOG" 2>/dev/null
     shared_copy "$line"
