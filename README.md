@@ -213,6 +213,13 @@ sudo ./vid2mos-log-summary.sh --since "2026-11-22 09:00"
 
 Not tested: a preview client dropping off the network in the middle of a job.
 
+## P5 Preview Monitor (companion app)
+
+A macOS app that watches preview generation on the P5 server and every client by reading this
+script's logs, and repairs failed previews: it finds each file in P5, restores it if the source is
+gone, makes the preview again on a client and attaches it to the archive entry. Its releases are
+published here, as pre-releases; see `p5-preview-monitor/RELEASE-NOTES-0.3.0.md`.
+
 ## Credit and licence
 
 Derived from the `vid2mos.sh` script in Archiware's blog post linked above. Archiware P5 is a
