@@ -244,23 +244,42 @@ show_fields() {
 }
 
 status "$C_ACTIVE" '\nQuick survey: %s listed files — name, path, size, type\n' "$total"
-printf 'item\tname_shell_quoted\tsource_shell_quoted\tsize_bytes\tfile_type_shell_quoted\tresult\n' > "$RUN/survey.tsv"
+printf 'item\tname_shell_quoted\tsource_shell_quoted\tsize_bytes\tfile_type_shell_quoted\tresult\tlink_target_shell_quoted\n' > "$RUN/survey.tsv"
 n=0
 while IFS= read -r source; do
     n=$((n + 1)); set_item
     mkdir -p "$REPORTS" "$OUTPUT" || die "Cannot create folders for $item"
     printf '%s\n' "$source" > "$WORK/source-path.txt"
     printf 'command\trequired\texit_code\n' > "$REPORTS/commands.tsv"
-    failed=0; size=unknown; description=unavailable
+    failed=0; size=unknown; description=unavailable; link_target=''
     status "$C_ACTIVE" '\n[%s/%s] %s\n' "$n" "$total" "$(basename -- "$source")"
     printf '  Path: %s\n' "$source"
     case "$source" in
         /*) ;;
         *) printf 'Expected an absolute path\n' > "$REPORTS/input-error.txt"; failed=1;;
     esac
-    if [ "$failed" -eq 0 ] && { [ ! -f "$source" ] || [ ! -r "$source" ]; }; then
-        printf 'Not a readable regular file\n' > "$REPORTS/input-error.txt"
-        failed=1
+    # A link first: -e, -f and -r all follow links, so a broken one looks the same as a missing
+    # file, and a working one would pass unnoticed while reporting its target's size and type.
+    if [ "$failed" -eq 0 ] && [ -L "$source" ]; then
+        link_target=$(readlink -- "$source" 2>/dev/null) || link_target='(unreadable link)'
+        printf '%s\n' "$link_target" > "$REPORTS/link-target.txt"
+        status "$C_WARN" '  Link: -> %s\n' "$link_target"
+        if [ ! -e "$source" ]; then
+            printf 'Broken symbolic link -> %s\n' "$link_target" > "$REPORTS/input-error.txt"
+            failed=1
+        fi
+    fi
+    if [ "$failed" -eq 0 ]; then
+        input_error=''
+        if [ ! -e "$source" ]; then input_error='File not found'
+        elif [ -d "$source" ]; then input_error='Is a folder, not a file'
+        elif [ ! -f "$source" ]; then input_error='Not a regular file (device, socket or pipe)'
+        elif [ ! -r "$source" ]; then input_error="Not readable by $(id -un) (permissions)"
+        fi
+        if [ -n "$input_error" ]; then
+            printf '%s\n' "$input_error" > "$REPORTS/input-error.txt"
+            failed=1
+        fi
     fi
     if [ "$failed" -eq 0 ]; then
         size=$(file_bytes "$source") || { size=unknown; failed=1; }
@@ -270,6 +289,13 @@ while IFS= read -r source; do
         capture file yes file -b "$source"
         description=$(cat "$REPORTS/file.stdout.txt")
         printf '  Type: %s\n' "${description:-unavailable}"
+        # A Finder alias is a small file of its own, not the movie, and the tools cannot follow it.
+        case "$description" in
+            *[Aa]lias*)
+                printf 'Finder alias, not the movie: resolve it in Finder and list the original\n' > "$REPORTS/input-error.txt"
+                status "$C_FAIL" '  FAIL: %s\n' "$(cat "$REPORTS/input-error.txt")"
+                failed=1;;
+        esac
         capture file-mime no file -b --mime-type "$source"
         capture ls no ls -l "$source"
         if [ "$OS" = Darwin ]; then capture stat no stat -x "$source"
@@ -278,7 +304,8 @@ while IFS= read -r source; do
         status "$C_FAIL" '  FAIL: %s\n' "$(cat "$REPORTS/input-error.txt")"
     fi
     save_result basics
-    printf '%s\t%q\t%q\t%s\t%q\t%s\n' "$item" "$(basename -- "$source")" "$source" "$size" "$description" "$result" >> "$RUN/survey.tsv"
+    printf '%s\t%q\t%q\t%s\t%q\t%s\t%s\n' "$item" "$(basename -- "$source")" "$source" "$size" "$description" "$result" \
+        "$(if [ -n "$link_target" ]; then printf '%q' "$link_target"; fi)" >> "$RUN/survey.tsv"
 done < "$LIST_SNAPSHOT"
 refresh_summary
 status "$C_OK" '\nBasic survey saved: %s\n' "$RUN/survey.tsv"

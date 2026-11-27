@@ -32,6 +32,13 @@ Earlier versions (1.0.0, 1.1.0) are described in the git history and the README.
     macOS bash 3.2 (`decode_args[@]: unbound variable`), because `set -u` treats an empty array
     as unset there; the run's `state` was left at `running`. Expanded with the 3.2-safe
     `${decode_args[@]+"${decode_args[@]}"}`.
+  - **Each unusable entry now says why.** "Not a readable regular file" covered a missing file,
+    a broken symbolic link, a folder, a pipe and a permission problem alike, because `-f` and
+    `-r` follow links. Links are checked first (`Broken symbolic link -> TARGET`), then the rest
+    get their own reason: `File not found`, `Is a folder, not a file`, `Not a regular file`,
+    `Not readable by USER (permissions)`. A Finder alias, which passed as a file before, fails
+    with `Finder alias, not the movie`. A working link is shown as `Link: -> TARGET`, and
+    `survey.tsv` gains a `link_target_shell_quoted` column.
 - **`vid2mos-test-runner.sh`**: runs the preview script over a list of files with one or more
   labelled ffmpeg + ffprobe builds (`--mode script|fallback|matrix`), a chosen limit
   (`--timeout S|none`), previews kept in the run folder or a review folder. Writes

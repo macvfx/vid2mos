@@ -40,9 +40,25 @@ Put one absolute path on each line of `file.txt`:
 
 Do not add shell quotes or escape spaces inside the text file. Blank lines are ignored.
 Windows CRLF line endings and a final line without a newline are supported. Duplicate entries
-are processed separately and receive separate numbered result folders. Relative paths,
-unreadable files, and missing files are reported as failures; other entries continue.
-Comment lines and paths containing embedded newlines are not supported.
+are processed separately and receive separate numbered result folders. Comment lines and paths
+containing embedded newlines are not supported.
+
+Each entry that cannot be inspected fails with its own reason, in `reports/input-error.txt`
+and on screen; the other entries continue:
+
+| Reason | What it means |
+| --- | --- |
+| `Expected an absolute path` | The line does not start with `/` |
+| `Broken symbolic link -> TARGET` | A link whose target is gone; `TARGET` is what it points to |
+| `File not found` | Nothing at that path |
+| `Is a folder, not a file` | The path names a folder |
+| `Not a regular file (device, socket or pipe)` | Something other than a file |
+| `Not readable by USER (permissions)` | A file the user running the script may not read |
+| `Finder alias, not the movie` | A Finder alias: resolve it in Finder and list the original |
+
+A symbolic link whose target exists is inspected, and the survey shows `Link: -> TARGET`.
+Its size and type are the target's. Copy mode copies the target; with `--skipcopy`, the
+preview script's own policy applies (`vid2mos-hardened.sh` 1.2.1 and later refuse links).
 
 ## What runs, and in what order
 
@@ -50,7 +66,7 @@ The script completes each survey pass across the entire list before starting int
 
 | Pass | Work | Where it reads |
 | --- | --- | --- |
-| 1. Basic survey | Count, name, path, size in bytes/GiB, `file` description, MIME type, `ls`, and `stat` | Original files in every mode |
+| 1. Basic survey | Count, name, path, symbolic link target, size in bytes/GiB, `file` description, MIME type, `ls`, and `stat` | Original files in every mode |
 | 2. Quick metadata | ExifTool JSON and ffprobe JSON; selected fields printed on screen | Original files in every mode |
 | 3. Intensive checks | Copy unless skipped; video/audio decode; mosaic preview; SHA-256; optional MediaInfo, `mdls`, and `xattr` | Copies by default; originals with `--skipcopy` |
 
@@ -164,6 +180,7 @@ movie-inspection.XXXXXX/
   state                     running, done, cancelled, or empty
   000001/
     source-path.txt         Original path
+    reports/link-target.txt What a symbolic link points to, when the entry is one
     result                  OK or FAIL
     phase                   basics, metadata, or intensive
     reports/
@@ -182,8 +199,8 @@ Captured commands normally have `<label>.command.txt`, `<label>.stdout.txt`, and
 `<label>.stderr.txt`. Open the stderr file named in a failure message for details. Input and
 preview validation failures also produce `input-error.txt` or `preview-error.txt`.
 
-`survey.tsv` contains the item number, name, original path, byte size, file type, and **basic
-survey result**. Later metadata or decode failures appear in `summary.tsv`, rather than
+`survey.tsv` contains the item number, name, original path, byte size, file type, **basic
+survey result**, and the symbolic link target (empty when the entry is not a link). Later metadata or decode failures appear in `summary.tsv`, rather than
 changing the basic survey result. `summary.tsv` records each item's cumulative required-check
 result and last completed pass. Optional command failures remain in `commands.tsv` and do
 not mark an otherwise successful item as failed. `state=done` means processing finished;
