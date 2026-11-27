@@ -21,6 +21,17 @@ Earlier versions (1.0.0, 1.1.0) are described in the git history and the README.
 ## Tools added after 1.2.1
 
 ### Features
+- **`inspect-movies.sh`** ([guide](INSPECT-MOVIES-README.md)): reads a text list of movie paths,
+  surveys every entry first (name, path, size, `file` type, ExifTool and ffprobe metadata), then,
+  unless `--survey`, copies each one (or reads it in place with `--skipcopy`), decodes the first
+  30 s (`DECODE_SECONDS`, `0` = all of it), makes a preview with the script in test mode and
+  hashes it. Every command's output and exit code is kept per file in a new
+  `movie-inspection.XXXXXX` folder; nothing is deleted. macOS `/bin/bash` 3.2 compatible.
+  The README linked it from 1.3.0 before the files were committed.
+  - Fix before its first commit: `DECODE_SECONDS=0` stopped the whole run at the first file under
+    macOS bash 3.2 (`decode_args[@]: unbound variable`), because `set -u` treats an empty array
+    as unset there; the run's `state` was left at `running`. Expanded with the 3.2-safe
+    `${decode_args[@]+"${decode_args[@]}"}`.
 - **`vid2mos-test-runner.sh`**: runs the preview script over a list of files with one or more
   labelled ffmpeg + ffprobe builds (`--mode script|fallback|matrix`), a chosen limit
   (`--timeout S|none`), previews kept in the run folder or a review folder. Writes

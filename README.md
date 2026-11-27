@@ -55,7 +55,7 @@ JPEG, on success; stderr empty; exit 0 or 1.
 | File | Purpose |
 |---|---|
 | `vid2mos-hardened.sh` | The preview script (drop-in replacement for `vid2mos.sh`) |
-| `test-vid2mos.sh` | 119 checks on synthetic media. `--compare <original>` also shows what the original does on the same inputs |
+| `test-vid2mos.sh` | 127 checks on synthetic media. `--compare <original>` also shows what the original does on the same inputs |
 | `batch-vid2mos.sh` | Runs the script over a folder of real media with a per-file report |
 | `vid2mos-test-runner.sh` | Runs the script over a list of files with one or more ffmpeg builds and a chosen time limit, one result row per file per build, previews kept. What P5 Preview Monitor's "Retry failed files" starts on a client |
 | `size-survey.sh` | Sizes every video file under a folder (count, min, median, mean, percentiles, max, size bands, per extension) and estimates the read time against the timeout |
