@@ -48,6 +48,9 @@ run() {
     ERRTXT=$(cat "$WORK/stderr.txt")
 }
 export VID2MOS_BIN_DIR="$BIN_DIR" VID2MOS_TMP="$OUT" VID2MOS_LOG="$WORK/vid2mos.log"
+# The fallback ffmpeg (1.4.0) is off unless a test turns it on, so this machine's
+# /usr/local/bin cannot change any other result.
+export VID2MOS_FALLBACK_BIN_DIR=""
 
 is_one_line()  { [ "$(printf '%s\n' "$OUTTXT" | grep -c .)" -eq 1 ]; }
 is_jpeg()      { [ -s "$1" ] && [ "$(head -c 2 "$1" | xxd -p)" = "ffd8" ]; }
@@ -180,6 +183,41 @@ rm -f "$SPARSE"
 check "a small file keeps the 120 s base, logged on OK"   'grep "normal.mp4" "$WORK/vid2mos.log" | grep " OK " | tail -n 1 | grep -q "limit=120s input="'
 st=$("$SCRIPT" --selftest 2>/dev/null)
 check "selftest reports the scaled limit"                 'printf "%s" "$st" | grep -q "^ffmpeg_timeout=scaled 120s + 1s per 100 MB, max 3600s$"'
+
+echo "13c. Fallback ffmpeg when the first has no decoder (1.4.0)"
+NODEC="$WORK/nodecoder"; ALSOBAD="$WORK/alsobad"; mkdir -p "$NODEC" "$ALSOBAD"
+# A first ffmpeg like Archiware's 7.1 meeting PNG video: it names the codec and exits 234.
+printf '#!/bin/sh\necho "[vist#0:0/png @ 0x1] Decoding requested, but no decoder found for: png" >&2\nexit 234\n' > "$NODEC/ffmpeg"
+printf '#!/bin/sh\necho "Invalid data found when processing input" >&2\nexit 1\n' > "$ALSOBAD/ffmpeg"
+chmod +x "$NODEC/ffmpeg" "$ALSOBAD/ffmpeg"
+cp "$BIN_DIR/ffprobe" "$NODEC/ffprobe"; cp "$BIN_DIR/ffprobe" "$ALSOBAD/ffprobe"
+cp "$MEDIA/normal.mp4" "$MEDIA/fb-ok.mp4"
+VID2MOS_BIN_DIR="$NODEC" VID2MOS_FALLBACK_BIN_DIR="$BIN_DIR" run "$MEDIA/fb-ok.mp4"
+check "the fallback makes the preview: exit 0, one JPEG path" '[ $RC -eq 0 ] && is_one_line && is_jpeg "$OUTTXT"'
+check "stderr is empty"                                      '[ -z "$ERRTXT" ]'
+check "log names the codec and the ffmpeg it tries next"     'grep "fb-ok.mp4" "$WORK/vid2mos.log" | grep -q "no decoder for png in $NODEC/ffmpeg: trying $BIN_DIR/ffmpeg"'
+check "the OK line says which ffmpeg made it"                'grep "fb-ok.mp4" "$WORK/vid2mos.log" | grep " OK " | grep -q "fallback=\"$BIN_DIR/ffmpeg\" codec=png input="'
+cp "$MEDIA/normal.mp4" "$MEDIA/fb-old.mp4"
+printf '#!/bin/sh\necho "Decoder (codec png) not found for input stream #0:0" >&2\nexit 1\n' > "$NODEC/ffmpeg"
+VID2MOS_BIN_DIR="$NODEC" VID2MOS_FALLBACK_BIN_DIR="$BIN_DIR" run "$MEDIA/fb-old.mp4"
+check "older ffmpeg wording is recognised too"               '[ $RC -eq 0 ] && grep "fb-old.mp4" "$WORK/vid2mos.log" | grep -q "no decoder for png"'
+printf '#!/bin/sh\necho "[vist#0:0/png @ 0x1] Decoding requested, but no decoder found for: png" >&2\nexit 234\n' > "$NODEC/ffmpeg"
+cp "$MEDIA/normal.mp4" "$MEDIA/fb-off.mp4"
+VID2MOS_BIN_DIR="$NODEC" run "$MEDIA/fb-off.mp4"
+check "fallback off: exit 1, no stdout, reason names the codec" '[ $RC -eq 1 ] && [ -z "$OUTTXT" ] && grep "fb-off.mp4" "$WORK/vid2mos.log" | grep -q "FAIL .*ffmpeg has no decoder for png (rc=234), fallback off"'
+cp "$MEDIA/normal.mp4" "$MEDIA/fb-none.mp4"
+VID2MOS_BIN_DIR="$NODEC" VID2MOS_FALLBACK_BIN_DIR="$WORK/no-such-folder" run "$MEDIA/fb-none.mp4"
+check "no fallback installed: the reason says where it looked" '[ $RC -eq 1 ] && grep "fb-none.mp4" "$WORK/vid2mos.log" | grep -q "no fallback ffmpeg in $WORK/no-such-folder"'
+cp "$MEDIA/normal.mp4" "$MEDIA/fb-bad.mp4"
+VID2MOS_BIN_DIR="$NODEC" VID2MOS_FALLBACK_BIN_DIR="$ALSOBAD" run "$MEDIA/fb-bad.mp4"
+check "fallback fails too: exit 1, reason names both"        '[ $RC -eq 1 ] && [ -z "$OUTTXT" ] && grep "fb-bad.mp4" "$WORK/vid2mos.log" | grep -q "with the fallback $ALSOBAD/ffmpeg, after no decoder for png in $NODEC/ffmpeg"'
+cp "$MEDIA/notes.mp4" "$MEDIA/fb-corrupt.mp4"
+VID2MOS_FALLBACK_BIN_DIR="$ALSOBAD" run "$MEDIA/fb-corrupt.mp4"
+check "any other failure does not try the fallback"          '[ $RC -eq 1 ] && ! grep "fb-corrupt.mp4" "$WORK/vid2mos.log" | grep -q "trying"'
+st=$(VID2MOS_FALLBACK_BIN_DIR="$BIN_DIR" VID2MOS_BIN_DIR="$NODEC" "$SCRIPT" --selftest 2>/dev/null)
+check "selftest names the fallback ffmpeg"                   'printf "%s" "$st" | grep -q "^fallback_ffmpeg=$BIN_DIR/ffmpeg$"'
+st=$("$SCRIPT" --selftest 2>/dev/null)
+check "selftest says when it is off, and still passes"       'printf "%s" "$st" | grep -q "^fallback_ffmpeg=off$" && printf "%s" "$st" | grep -q "^result=PASS$"'
 
 echo "14. Logging"
 check "log file written"                    '[ -s "$WORK/vid2mos.log" ]'

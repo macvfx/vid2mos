@@ -2,6 +2,28 @@
 
 Earlier versions (1.0.0, 1.1.0) are described in the git history and the README.
 
+## 1.4.0
+
+### Changes
+- **A second ffmpeg for codecs P5's ffmpeg cannot decode.** Archiware's bundled ffmpeg 7.1 has no
+  PNG decoder, so every PNG-codec movie (After Effects renders, here two 15 s 1920x1080 and
+  1200x1200 assets) failed with `ffmpeg failed (rc=234)` on every client, every time: ffmpeg's own
+  log says `Decoding requested, but no decoder found for: png`. Reproduced with a synthetic PNG
+  movie, with and without alpha: P5's ffmpeg fails, ffmpeg 9.0.2 in `/usr/local/bin` makes the
+  preview in a second. When ffmpeg's log names a missing decoder (ffmpeg 7+ and the older
+  `Decoder (codec X) not found` wording), the run is tried once more with
+  `$VID2MOS_FALLBACK_BIN_DIR/ffmpeg` + `ffprobe`, default `/usr/local/bin`, only when both are
+  there. Any other failure, and a timeout, never triggers it.
+- The log says what happened: `no decoder for png in /usr/local/aw/bin/ffmpeg: trying
+  /usr/local/bin/ffmpeg`, then an `OK` line ending `fallback="/usr/local/bin/ffmpeg" codec=png`.
+  A failure names the codec instead of a bare return code: `ffmpeg has no decoder for png
+  (rc=234), no fallback ffmpeg in /usr/local/bin` (or `fallback off`, or `failed ... with the
+  fallback ...`). `--selftest` prints `fallback_ffmpeg=` and its version; a missing fallback is
+  never a FAIL.
+- `vid2mos-test-runner.sh` turns the fallback off, so a retry row's toolchain is always the ffmpeg
+  that made (or failed to make) its preview; its next-toolchain mode does the same job in view.
+- Tests: section 13c, 11 checks (138 in all).
+
 ## 1.3.0
 
 ### Changes

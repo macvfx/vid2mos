@@ -31,6 +31,10 @@
 #   * Optional second copy of the log in a shared folder (VID2MOS_SHARED_DIR), one file per
 #     host per day, so a monitor can read every machine's runs from one place. The copy is
 #     best effort: it is written in the background and can never delay or fail a run.
+#   * A codec Archiware's ffmpeg cannot decode (1.4.0; e.g. PNG video from After Effects, which
+#     P5's bundled ffmpeg 7.1 is built without) is tried once more with a second ffmpeg, by default
+#     /usr/local/bin/ffmpeg + ffprobe when both are there. The log names the codec and which
+#     ffmpeg made the preview. Only "no decoder" triggers it: any other failure stays a failure.
 #   * --version and --selftest [source-path] for pre-flight checks (see below).
 #   * --test (or VID2MOS_MODE=test) for test runs that stay out of P5's log (see below).
 #
@@ -68,8 +72,11 @@
 #   VID2MOS_TIMEOUT_RATE   scaled limit: MB of file per extra second (default 100)
 #   VID2MOS_TIMEOUT_MAX    scaled limit: ceiling in seconds (default 3600)
 #   VID2MOS_PROBE_TIMEOUT  ffprobe limit, seconds
+#   VID2MOS_FALLBACK_BIN_DIR  folder of the second ffmpeg + ffprobe, used only when the first has
+#                          no decoder for the file (default /usr/local/bin; set it empty to turn
+#                          the fallback off)
 
-VERSION="1.3.0"
+VERSION="1.4.0"
 MODE=""
 VERBOSE=""
 TEST_MODE=""
@@ -133,6 +140,8 @@ case "$TIMEOUT_MAX"  in ''|*[!0-9]*|0) TIMEOUT_MAX=3600;; esac
 FFMPEG_TIMEOUT="$VID2MOS_TIMEOUT"
 case "$FFMPEG_TIMEOUT" in *[!0-9]*) FFMPEG_TIMEOUT=120;; esac   # unset stays empty: scaled
 PROBE_TIMEOUT="${VID2MOS_PROBE_TIMEOUT:-30}"
+# Second ffmpeg, for codecs the first was built without. "-" not ":-": set but empty = off.
+FALLBACK_BIN="${VID2MOS_FALLBACK_BIN_DIR-/usr/local/bin}"
 
 position=10                    # seek point, seconds
 tiles_x=4; tiles_y=3           # 4 x 3 = 12 frames
@@ -209,6 +218,17 @@ if [ "$MODE" = "selftest" ]; then
     # First line of -version, e.g. "ffmpeg version 7.1 Copyright ...": tells clients apart.
     [ -x "$FFMPEG" ]  && echo "ffmpeg_version=$("$FFMPEG" -version 2>/dev/null < /dev/null | head -n 1)"
     [ -x "$FFPROBE" ] && echo "ffprobe_version=$("$FFPROBE" -version 2>/dev/null < /dev/null | head -n 1)"
+    # The fallback is optional: reported, never a FAIL.
+    if [ -z "$FALLBACK_BIN" ]; then
+        echo "fallback_ffmpeg=off"
+    elif [ "$FALLBACK_BIN" = "$AW_BIN" ]; then
+        echo "fallback_ffmpeg=same folder as bin_dir (no fallback)"
+    elif [ -x "$FALLBACK_BIN/ffmpeg" ] && [ -x "$FALLBACK_BIN/ffprobe" ]; then
+        echo "fallback_ffmpeg=$FALLBACK_BIN/ffmpeg"
+        echo "fallback_ffmpeg_version=$("$FALLBACK_BIN/ffmpeg" -version 2>/dev/null < /dev/null | head -n 1)"
+    else
+        echo "fallback_ffmpeg=none ($FALLBACK_BIN/ffmpeg and ffprobe not both there)"
+    fi
     st_check tmp_dir test -d "$TMP" -a -w "$TMP"
     if [ -n "$LOG_DIR" ]; then
         echo "log_dir=$LOG_DIR"
@@ -344,13 +364,47 @@ make_mosaic() {   # make_mosaic [seek-seconds]   (no argument = no -ss at all)
     return $?
 }
 
-make_mosaic "$position"; rc=$?
+try_mosaic() {   # the seek pass, then (unless it timed out) one pass without the seek; sets rc
+    make_mosaic "$position"; rc=$?
+    if [ ! -s "$output_file" ] && [ ! -e "$TIMEOUT_MARK" ]; then
+        # Short clip (shorter than the seek point), a still image, or the seek found nothing:
+        # retry with no seek at all (note: "-ss 0" makes ffmpeg 7.x emit nothing for a JPEG).
+        # Not after a timeout: a second pass over the whole file would only take longer.
+        log "retry without seek rc=$rc input=\"$input_file\""
+        make_mosaic; rc=$?
+    fi
+}
+
+# The codec ffmpeg says it has no decoder for, or empty. ffmpeg 7+: "Decoding requested, but no
+# decoder found for: png"; older: "Decoder (codec png) not found for input stream #0:0".
+missing_decoder() {
+    sed -n -e 's/.*no decoder found for: *\([A-Za-z0-9_]*\).*/\1/p' \
+           -e 's/.*Decoder (codec \([A-Za-z0-9_]*\)) not found.*/\1/p' "$ffmpeg_log" 2>/dev/null | head -n 1
+}
+
+try_mosaic
+fallback_note=""
+no_decoder=""
 if [ ! -s "$output_file" ] && [ ! -e "$TIMEOUT_MARK" ]; then
-    # Short clip (shorter than the seek point), a still image, or the seek found nothing:
-    # retry with no seek at all (note: "-ss 0" makes ffmpeg 7.x emit nothing for a JPEG).
-    # Not after a timeout: a second pass over the whole file would only take longer.
-    log "retry without seek rc=$rc input=\"$input_file\""
-    make_mosaic; rc=$?
+    no_decoder=$(missing_decoder)
+fi
+if [ -n "$no_decoder" ]; then
+    if [ -n "$FALLBACK_BIN" ] && [ "$FALLBACK_BIN" != "$AW_BIN" ] && [ "$FALLBACK_BIN/ffmpeg" != "$FFMPEG" ] \
+       && [ -x "$FALLBACK_BIN/ffmpeg" ] && [ -x "$FALLBACK_BIN/ffprobe" ]; then
+        log "no decoder for $no_decoder in $FFMPEG: trying $FALLBACK_BIN/ffmpeg input=\"$input_file\""
+        first_ffmpeg="$FFMPEG"
+        FFMPEG="$FALLBACK_BIN/ffmpeg"; FFPROBE="$FALLBACK_BIN/ffprobe"
+        try_mosaic
+        if [ -s "$output_file" ]; then
+            fallback_note=" fallback=\"$FFMPEG\" codec=$no_decoder"
+        elif [ ! -e "$TIMEOUT_MARK" ]; then
+            fail "ffmpeg failed (rc=$rc) with the fallback $FFMPEG, after no decoder for $no_decoder in $first_ffmpeg see $ffmpeg_log"
+        fi
+    elif [ -z "$FALLBACK_BIN" ]; then
+        fail "ffmpeg has no decoder for $no_decoder (rc=$rc), fallback off see $ffmpeg_log"
+    else
+        fail "ffmpeg has no decoder for $no_decoder (rc=$rc), no fallback ffmpeg in $FALLBACK_BIN see $ffmpeg_log"
+    fi
 fi
 
 if [ $rc -ne 0 ] && [ ! -s "$output_file" ]; then
@@ -363,6 +417,6 @@ fi
 
 # Success: the log of a clean run is not needed.
 rm -f "$ffmpeg_log"
-log "OK ($(( SECONDS - START ))s) frames=$total_frames via=$method interval=$interval limit=${FFMPEG_TIMEOUT}s input=\"$input_file\" output=\"$output_file\""
+log "OK ($(( SECONDS - START ))s) frames=$total_frames via=$method interval=$interval limit=${FFMPEG_TIMEOUT}s${fallback_note} input=\"$input_file\" output=\"$output_file\""
 printf '%s\n' "$output_file"
 exit 0

@@ -66,6 +66,9 @@ client's log too.
   normally and skipped those previews. The cause of each was not checked; a missing script path is
   the one reproduced earlier. One batch with 257 such warnings has no finish line in the server log; why
   is not known (a P5 restart or a cancelled job would look the same).
+- **Codecs P5's ffmpeg lacks:** Archiware's ffmpeg 7.1 has no PNG decoder, so PNG-codec movies
+  from After Effects fail with `rc=234` on every client. 1.4.0 retries them with
+  `/usr/local/bin/ffmpeg` when it is installed (see the README).
 - **Timeouts:** the log says `TIMED OUT` only when the watchdog fired; a corrupt file is reported
   as an ffmpeg failure.
 

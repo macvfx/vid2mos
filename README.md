@@ -36,6 +36,14 @@ silently:
   1 hour. A 1 GB file gets 130 s, a 60 GB file 12 minutes, files from about 350 GB up the full
   hour. See "Retrying failed files, and sizing the timeout" below for the numbers behind it.
 - **Short clips and stills** retry without a seek instead of producing nothing.
+- **A second ffmpeg for codecs P5's cannot read** (1.4.0): Archiware's bundled ffmpeg 7.1 is built
+  without some decoders, PNG among them, so PNG-codec movies (common from After Effects) always
+  failed with `ffmpeg failed (rc=234)`. When ffmpeg says it has no decoder for the file, the run is
+  tried once more with `/usr/local/bin/ffmpeg` and `ffprobe` if both are installed, and the `OK`
+  line ends `fallback="/usr/local/bin/ffmpeg" codec=png`. Without one, the reason names the codec:
+  `ffmpeg has no decoder for png (rc=234), no fallback ffmpeg in /usr/local/bin`. No other failure
+  triggers it. `VID2MOS_FALLBACK_BIN_DIR` picks another folder, or turns it off when set empty;
+  `--selftest` prints `fallback_ffmpeg=`.
 - **Frame count fallback**: `nb_frames`, then duration x frame rate, then the first frames.
 - **Optional shared copy of the log**: set `VID2MOS_SHARED_DIR` and every log line is also written to
   `vid2mos-<host>-YYYY-MM-DD.log` there, so one monitor can read every machine's runs from one place.
@@ -80,6 +88,7 @@ Optional environment variables: `VID2MOS_BIN_DIR`, `VID2MOS_FFMPEG`, `VID2MOS_FF
 `VID2MOS_LOG` (one fixed file), `VID2MOS_TIMEOUT` (one fixed ffmpeg limit, replacing the scaled
 one), `VID2MOS_TIMEOUT_BASE` / `VID2MOS_TIMEOUT_RATE` / `VID2MOS_TIMEOUT_MAX` (the scaled limit:
 120 s, 100 MB per second, 3600 s), `VID2MOS_PROBE_TIMEOUT`, `VID2MOS_SHARED_DIR`,
+`VID2MOS_FALLBACK_BIN_DIR` (1.4.0: second ffmpeg folder, default `/usr/local/bin`, empty = off),
 `VID2MOS_MODE` (`test`, as `--test`), `VID2MOS_FOLLOW_SYMLINKS` (`1` = preview what a symbolic
 link points to; by default, since 1.2.1, a link is logged as "source is a symbolic link, not previewed").
 

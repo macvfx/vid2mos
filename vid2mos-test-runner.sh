@@ -92,6 +92,10 @@ printf 'running 0 %d\n' "$total" > "$RUN_DIR/state"
 
 export VID2MOS_MODE=test VID2MOS_TMP="$WORK" VID2MOS_LOG="$LOGF"
 unset VID2MOS_SHARED_DIR
+# Each row tests the ffmpeg it names: vid2mos 1.4.0's own fallback ffmpeg is off here, so a
+# preview never comes from another toolchain than the row says. The run's next-toolchain mode
+# covers the same ground, visibly.
+export VID2MOS_FALLBACK_BIN_DIR=""
 [ -z "$TIMEOUT" ] || export VID2MOS_TIMEOUT="$TIMEOUT"
 
 child=""
