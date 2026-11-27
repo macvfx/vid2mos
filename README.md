@@ -213,7 +213,7 @@ sudo ./vid2mos-log-summary.sh --since "2026-11-22 09:00"
 
 Not tested: a preview client dropping off the network in the middle of a job.
 
-## P5 Preview Monitor (companion app)
+## P5 Preview Monitor (Mac desktop app)
 
 A macOS app that watches preview generation on the P5 server and every client by reading this
 script's logs, and repairs failed previews: it finds each file in P5, restores it if the source is
