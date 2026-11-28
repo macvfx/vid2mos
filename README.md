@@ -71,6 +71,7 @@ JPEG, on success; stderr empty; exit 0 or 1.
 | `vid2mos-log-summary.sh` | Summarises the daily logs: totals per host, runs per minute, unfinished runs, latest failures |
 | `prepare-client.sh` | One command to get a Mac ready: installs the script to `/Library/Scripts`, checks ffmpeg and Remote Login, runs `--selftest`. `--check` changes nothing |
 | `TESTING.md` | How to test the scripts, what to record, and findings so far |
+| [`CHECKING-VIDEO-FILES.md`](CHECKING-VIDEO-FILES.md) | How to tell whether a video file is a real, complete movie: size, type, first bytes, the QuickTime index, ffprobe and ffmpeg messages, links and placeholders |
 
 ## Standalone use
 
